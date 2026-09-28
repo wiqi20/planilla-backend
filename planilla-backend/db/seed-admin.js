@@ -1,7 +1,9 @@
 // Crea (o resetea) la empresa y el usuario administrador por defecto.
+// Por defecto: subdominio "admin", usuario "Admin", contraseña "IexxI"
+// (coincide con el subdominio fijo que usa el login del frontend).
 // Uso:
 //   node db/seed-admin.js
-//   node db/seed-admin.js --subdominio=miempresa --usuario=admin --password=admin --nombre="Mi Empresa"
+//   node db/seed-admin.js --subdominio=admin --usuario=Admin --password=OtraClave --nombre="Mi Empresa"
 //
 // Es seguro correrlo varias veces: si la empresa/usuario ya existen, solo
 // actualiza la contraseña del usuario indicado en vez de duplicar filas.
@@ -23,8 +25,8 @@ async function main() {
   }
 
   const subdominio = String(arg('subdominio', 'admin')).trim().toLowerCase();
-  const usuario = arg('usuario', 'admin');
-  const password = arg('password', 'admin');
+  const usuario = arg('usuario', 'Admin');
+  const password = arg('password', 'IexxI');
   const nombreEmpresa = arg('nombre', 'Empresa Admin');
 
   const pool = new Pool({
