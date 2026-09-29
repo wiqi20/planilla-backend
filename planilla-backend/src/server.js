@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth.routes');
 const empleadosRoutes = require('./routes/empleados.routes');
 const colillasRoutes = require('./routes/colillas.routes');
 const reportesRoutes = require('./routes/reportes.routes');
+const boletasRoutes = require('./routes/boletas.routes');
 const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
@@ -23,6 +24,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/empleados', requireAuth, empleadosRoutes);
 app.use('/api/colillas', requireAuth, colillasRoutes);
 app.use('/api/reportes', requireAuth, reportesRoutes);
+app.use('/api/boletas', requireAuth, boletasRoutes);
 app.use('/api/admin', requireAuth, adminRoutes);
 
 // Manejo de errores no capturados en rutas async (evita que el server truene)

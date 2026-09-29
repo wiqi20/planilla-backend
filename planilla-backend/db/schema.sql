@@ -39,8 +39,10 @@ CREATE TABLE IF NOT EXISTS colillas (
   periodo_inicio   DATE NOT NULL,
   periodo_fin      DATE NOT NULL,
   datos            JSONB NOT NULL,              -- horas, dias, montos calculados (ver calculo.js)
+  creado_por       TEXT,                        -- usuario administrativo que la generó/editó
   creado_en        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE colillas ADD COLUMN IF NOT EXISTS creado_por TEXT;
 
 -- Una sola colilla "vigente" por empleado y período (se puede recalcular/sobreescribir
 -- mientras no se haya cerrado el período, pero solo existe un registro guardado a la vez).
@@ -53,9 +55,26 @@ CREATE TABLE IF NOT EXISTS reportes (
   periodo_inicio   DATE NOT NULL,
   periodo_fin      DATE NOT NULL,
   datos            JSONB NOT NULL,              -- snapshot de filas + totales al momento de generarlo
+  creado_por       TEXT,                        -- usuario administrativo que lo generó
   creado_en        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE reportes ADD COLUMN IF NOT EXISTS creado_por TEXT;
+
+CREATE TABLE IF NOT EXISTS boletas_vacaciones (
+  id               SERIAL PRIMARY KEY,
+  empresa_id       INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+  empleado_id      INTEGER NOT NULL REFERENCES empleados(id) ON DELETE CASCADE,
+  dias_disfrutar   NUMERIC(6,2) NOT NULL,
+  periodo_inicio   DATE NOT NULL,
+  periodo_fin      DATE NOT NULL,
+  fecha_generacion DATE NOT NULL,
+  creado_por       TEXT,
+  actualizado_por  TEXT,
+  creado_en        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actualizado_en   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS empleados_empresa_idx ON empleados (empresa_id);
 CREATE INDEX IF NOT EXISTS colillas_empresa_idx ON colillas (empresa_id);
 CREATE INDEX IF NOT EXISTS reportes_empresa_idx ON reportes (empresa_id);
+CREATE INDEX IF NOT EXISTS boletas_vacaciones_empresa_idx ON boletas_vacaciones (empresa_id);

@@ -109,12 +109,12 @@ router.post('/guardar', asyncHandler(async (req, res) => {
 
     // Si ya existía una colilla para este empleado+período, se sobreescribe (permite corregir errores).
     const colillaResult = await client.query(
-      `INSERT INTO colillas (empresa_id, empleado_id, periodo_inicio, periodo_fin, datos)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO colillas (empresa_id, empleado_id, periodo_inicio, periodo_fin, datos, creado_por)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (empleado_id, periodo_inicio, periodo_fin)
-       DO UPDATE SET datos = EXCLUDED.datos, creado_en = now()
-       RETURNING id, periodo_inicio, periodo_fin, datos, creado_en`,
-      [req.empresaId, empleado.id, periodoInicio, periodoFin, JSON.stringify(datos)]
+       DO UPDATE SET datos = EXCLUDED.datos, creado_por = EXCLUDED.creado_por, creado_en = now()
+       RETURNING id, periodo_inicio, periodo_fin, datos, creado_por, creado_en`,
+      [req.empresaId, empleado.id, periodoInicio, periodoFin, JSON.stringify(datos), req.usuarioNombre || null]
     );
 
     // Si esta colilla ya formaba parte de algún reporte general guardado para
@@ -162,7 +162,7 @@ router.get('/', asyncHandler(async (req, res) => {
   if (empleadoId) { valores.push(empleadoId); condiciones.push('c.empleado_id = $' + valores.length); }
 
   const result = await db.query(
-    `SELECT c.id, c.empleado_id, e.nombre AS empleado_nombre, c.periodo_inicio, c.periodo_fin, c.datos, c.creado_en
+    `SELECT c.id, c.empleado_id, e.nombre AS empleado_nombre, c.periodo_inicio, c.periodo_fin, c.datos, c.creado_por, c.creado_en
      FROM colillas c JOIN empleados e ON e.id = c.empleado_id
      WHERE ${condiciones.join(' AND ')}
      ORDER BY c.periodo_inicio DESC, e.nombre ASC`,

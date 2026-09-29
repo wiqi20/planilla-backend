@@ -54,10 +54,10 @@ router.post('/generar', asyncHandler(async (req, res) => {
   const datosReporte = { filas, totales, faltantes };
 
   const guardado = await db.query(
-    `INSERT INTO reportes (empresa_id, periodo_inicio, periodo_fin, datos)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, periodo_inicio, periodo_fin, datos, creado_en`,
-    [req.empresaId, periodoInicio, periodoFin, JSON.stringify(datosReporte)]
+    `INSERT INTO reportes (empresa_id, periodo_inicio, periodo_fin, datos, creado_por)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, periodo_inicio, periodo_fin, datos, creado_por, creado_en`,
+    [req.empresaId, periodoInicio, periodoFin, JSON.stringify(datosReporte), req.usuarioNombre || null]
   );
 
   res.status(201).json(guardado.rows[0]);
@@ -66,7 +66,7 @@ router.post('/generar', asyncHandler(async (req, res) => {
 // GET /api/reportes  -> historial de reportes generados
 router.get('/', asyncHandler(async (req, res) => {
   const result = await db.query(
-    `SELECT id, periodo_inicio, periodo_fin, datos, creado_en
+    `SELECT id, periodo_inicio, periodo_fin, datos, creado_por, creado_en
      FROM reportes WHERE empresa_id = $1
      ORDER BY periodo_inicio DESC, creado_en DESC`,
     [req.empresaId]
