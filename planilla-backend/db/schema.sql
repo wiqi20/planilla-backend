@@ -70,9 +70,11 @@ CREATE TABLE IF NOT EXISTS boletas_vacaciones (
   fecha_generacion DATE NOT NULL,
   creado_por       TEXT,
   actualizado_por  TEXT,
+  firma_imagen     TEXT,                        -- foto/escaneo de la boleta firmada, como data URL base64
   creado_en        TIMESTAMPTZ NOT NULL DEFAULT now(),
   actualizado_en   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE boletas_vacaciones ADD COLUMN IF NOT EXISTS firma_imagen TEXT;
 
 CREATE INDEX IF NOT EXISTS empleados_empresa_idx ON empleados (empresa_id);
 CREATE INDEX IF NOT EXISTS colillas_empresa_idx ON colillas (empresa_id);
