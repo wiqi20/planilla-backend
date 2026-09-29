@@ -4,6 +4,7 @@
 // Uso:
 //   node db/seed-admin.js
 //   node db/seed-admin.js --subdominio=admin --usuario=Admin --password=OtraClave --nombre="Mi Empresa"
+//   node db/seed-admin.js --database-url=postgresql://user:pass@host:puerto/db  (si no tienes DATABASE_URL en el entorno)
 //
 // Es seguro correrlo varias veces: si la empresa/usuario ya existen, solo
 // actualiza la contraseña del usuario indicado en vez de duplicar filas.
@@ -19,8 +20,9 @@ function arg(nombre, porDefecto) {
 }
 
 async function main() {
-  if (!process.env.DATABASE_URL) {
-    console.error('Falta la variable de entorno DATABASE_URL.');
+  const databaseUrl = arg('database-url', process.env.DATABASE_URL);
+  if (!databaseUrl) {
+    console.error('Falta DATABASE_URL (o pasa --database-url=... ).');
     process.exit(1);
   }
 
@@ -30,8 +32,8 @@ async function main() {
   const nombreEmpresa = arg('nombre', 'Empresa Admin');
 
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+    connectionString: databaseUrl,
+    ssl: databaseUrl.includes('localhost') ? false : { rejectUnauthorized: false }
   });
 
   const client = await pool.connect();
