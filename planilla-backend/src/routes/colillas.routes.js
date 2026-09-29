@@ -71,9 +71,24 @@ router.post('/guardar', asyncHandler(async (req, res) => {
 
     const inputs = extraerInputs(req.body);
 
-    if (inputs.diasVacaciones > Number(empleado.vacaciones_disponibles)) {
+    // Si ya existía una colilla guardada para este empleado+período (se está
+    // corrigiendo una colilla previa), sus días de vacaciones ya fueron
+    // descontados del saldo. Se "restauran" temporalmente para validar y
+    // recalcular el descuento correcto, en vez de descontar el valor nuevo
+    // encima del que ya se había descontado antes.
+    const previaResult = await client.query(
+      'SELECT datos FROM colillas WHERE empresa_id = $1 AND empleado_id = $2 AND periodo_inicio = $3 AND periodo_fin = $4',
+      [req.empresaId, empleado.id, periodoInicio, periodoFin]
+    );
+    const diasVacacionesPrevios = previaResult.rows[0] ? (Number(previaResult.rows[0].datos.diasVacaciones) || 0) : 0;
+    const saldoEfectivo = Number(empleado.vacaciones_disponibles) + diasVacacionesPrevios;
+
+    if (inputs.diasVacaciones > saldoEfectivo) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'El colaborador solo tiene ' + empleado.vacaciones_disponibles + ' día(s) de vacaciones disponibles' });
+      return res.status(400).json({
+        error: 'El colaborador solo tiene ' + saldoEfectivo + ' día(s) de vacaciones disponibles',
+        vacacionesDisponibles: saldoEfectivo
+      });
     }
     if (inputs.horasFeriado > 0 && !feriadoNombre) {
       await client.query('ROLLBACK');
@@ -82,10 +97,11 @@ router.post('/guardar', asyncHandler(async (req, res) => {
 
     const resultado = calcularPlanilla(Number(empleado.salario), inputs);
 
-    if (inputs.diasVacaciones > 0) {
+    const deltaVacaciones = inputs.diasVacaciones - diasVacacionesPrevios;
+    if (deltaVacaciones !== 0) {
       await client.query(
         'UPDATE empleados SET vacaciones_disponibles = vacaciones_disponibles - $1, actualizado_en = now() WHERE id = $2',
-        [inputs.diasVacaciones, empleado.id]
+        [deltaVacaciones, empleado.id]
       );
     }
 
@@ -100,6 +116,29 @@ router.post('/guardar', asyncHandler(async (req, res) => {
        RETURNING id, periodo_inicio, periodo_fin, datos, creado_en`,
       [req.empresaId, empleado.id, periodoInicio, periodoFin, JSON.stringify(datos)]
     );
+
+    // Si esta colilla ya formaba parte de algún reporte general guardado para
+    // el mismo período, se actualiza también ese reporte con los nuevos montos
+    // (fila del colaborador + totales), para que quede consistente.
+    const reportesResult = await client.query(
+      'SELECT id, datos FROM reportes WHERE empresa_id = $1 AND periodo_inicio = $2 AND periodo_fin = $3',
+      [req.empresaId, periodoInicio, periodoFin]
+    );
+    for (const reporte of reportesResult.rows) {
+      const filas = reporte.datos.filas || [];
+      const idx = filas.findIndex(f => f.empleadoId === empleado.id);
+      if (idx === -1) continue; // este reporte no incluía a este colaborador; no se toca
+      filas[idx] = { empleadoId: empleado.id, nombre: empleado.nombre, correo: empleado.correo, ...datos };
+      const totales = filas.reduce((acc, f) => {
+        acc.totBruto += Number(f.brutoQuincenal) || 0;
+        acc.totCcss += Number(f.ccss) || 0;
+        acc.totRenta += Number(f.renta) || 0;
+        acc.totNeto += Number(f.neto) || 0;
+        return acc;
+      }, { totBruto: 0, totCcss: 0, totRenta: 0, totNeto: 0 });
+      const nuevosDatos = { ...reporte.datos, filas, totales };
+      await client.query('UPDATE reportes SET datos = $1 WHERE id = $2', [JSON.stringify(nuevosDatos), reporte.id]);
+    }
 
     await client.query('COMMIT');
     res.status(201).json(colillaResult.rows[0]);
