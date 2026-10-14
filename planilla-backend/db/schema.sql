@@ -80,3 +80,11 @@ CREATE INDEX IF NOT EXISTS empleados_empresa_idx ON empleados (empresa_id);
 CREATE INDEX IF NOT EXISTS colillas_empresa_idx ON colillas (empresa_id);
 CREATE INDEX IF NOT EXISTS reportes_empresa_idx ON reportes (empresa_id);
 CREATE INDEX IF NOT EXISTS boletas_vacaciones_empresa_idx ON boletas_vacaciones (empresa_id);
+
+-- Venta como servicio: una empresa puede suspenderse (sin borrar sus datos), ser la demo pública
+-- y quedar ligada a la suscripción de Stripe que la paga.
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS activa BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS es_demo BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS empresas_stripe_subscription_idx
+  ON empresas (stripe_subscription_id) WHERE stripe_subscription_id IS NOT NULL;

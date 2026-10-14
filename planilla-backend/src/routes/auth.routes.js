@@ -4,18 +4,23 @@ const db = require('../db');
 const { hashPassword, verificarPassword, firmarToken } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
 
-const SLUG_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/; // válido como subdominio
+const { validarSubdominio } = require('../subdominios');
 
 // POST /api/auth/registrar-empresa
 // Alta de un nuevo cliente de sticr.com: crea la empresa + su primer usuario administrador.
+// Desactivado por defecto: en el servicio compartido las empresas se crean solo desde
+// /api/provision (después de confirmar el pago). Se puede reactivar con ALLOW_PUBLIC_REGISTRATION=true.
 router.post('/registrar-empresa', asyncHandler(async (req, res) => {
+  if (process.env.ALLOW_PUBLIC_REGISTRATION !== 'true') {
+    return res.status(403).json({ error: 'El registro público está desactivado' });
+  }
   const { nombreEmpresa, subdominio, usuario, password } = req.body || {};
 
   if (!nombreEmpresa || !subdominio || !usuario || !password) {
     return res.status(400).json({ error: 'Faltan campos requeridos' });
   }
   const subdominioNormalizado = String(subdominio).trim().toLowerCase();
-  if (!SLUG_REGEX.test(subdominioNormalizado)) {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdominioNormalizado)) {
     return res.status(400).json({ error: 'El subdominio solo puede tener letras minúsculas, números y guiones' });
   }
   if (String(password).length < 4) {
@@ -65,12 +70,15 @@ router.post('/login', asyncHandler(async (req, res) => {
 
   try {
     const empresaResult = await db.query(
-      'SELECT id, nombre, subdominio FROM empresas WHERE subdominio = $1',
+      'SELECT id, nombre, subdominio, activa FROM empresas WHERE subdominio = $1',
       [String(subdominio).trim().toLowerCase()]
     );
     const empresa = empresaResult.rows[0];
     if (!empresa) {
       return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
+    }
+    if (!empresa.activa) {
+      return res.status(403).json({ error: 'Esta cuenta está suspendida. Contacta a STI para reactivarla.', codigo: 'suspendida' });
     }
 
     const usuarioResult = await db.query(
@@ -88,6 +96,7 @@ router.post('/login', asyncHandler(async (req, res) => {
     }
 
     const token = firmarToken({ empresaId: empresa.id, usuarioId: usuarioFila.id, usuario: usuarioFila.usuario });
+    delete empresa.activa;
     res.json({ token, empresa, usuario: { id: usuarioFila.id, usuario: usuarioFila.usuario } });
   } catch (err) {
     console.error(err);
@@ -97,10 +106,9 @@ router.post('/login', asyncHandler(async (req, res) => {
 
 // GET /api/auth/subdominio-disponible?valor=cliente1
 router.get('/subdominio-disponible', asyncHandler(async (req, res) => {
-  const valor = String(req.query.valor || '').trim().toLowerCase();
-  if (!SLUG_REGEX.test(valor)) {
-    return res.json({ disponible: false, motivo: 'formato inválido' });
-  }
+  const revision = validarSubdominio(req.query.valor);
+  if (!revision.ok) return res.json({ disponible: false, motivo: revision.motivo });
+  const valor = revision.valor;
   const result = await db.query('SELECT 1 FROM empresas WHERE subdominio = $1', [valor]);
   res.json({ disponible: result.rows.length === 0 });
 }));
