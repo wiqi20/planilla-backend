@@ -17,7 +17,15 @@ async function main() {
   });
 
   const schemaPath = path.join(__dirname, 'schema.sql');
-  const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+  let schemaSql = fs.readFileSync(schemaPath, 'utf8');
+  const schema = process.env.DB_SCHEMA;
+  if (schema) {
+    if (!/^[a-z_][a-z0-9_]{0,40}$/.test(schema)) {
+      console.error('DB_SCHEMA solo puede tener minúsculas, números y guion bajo.');
+      process.exit(1);
+    }
+    schemaSql = `CREATE SCHEMA IF NOT EXISTS ${schema}; SET search_path TO ${schema};\n` + schemaSql;
+  }
 
   console.log('Aplicando esquema desde db/schema.sql ...');
   try {

@@ -9,6 +9,8 @@ const colillasRoutes = require('./routes/colillas.routes');
 const reportesRoutes = require('./routes/reportes.routes');
 const boletasRoutes = require('./routes/boletas.routes');
 const adminRoutes = require('./routes/admin.routes');
+const provisionRoutes = require('./routes/provision.routes');
+const { iniciarDemoProgramado } = require('./demo');
 
 const app = express();
 
@@ -19,6 +21,9 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 // Rutas públicas (registro de empresa, login)
 app.use('/api/auth', authRoutes);
+
+// Rutas para el sitio sticr.app (crear/suspender empresas al comprar). Exigen PROVISION_SECRET.
+app.use('/api/provision', provisionRoutes);
 
 // A partir de aquí, toda ruta exige un JWT válido y queda aislada por empresa
 app.use('/api/empleados', requireAuth, empleadosRoutes);
@@ -36,6 +41,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Planilla backend escuchando en el puerto ${PORT}`);
+  iniciarDemoProgramado();
 });
 
 // Red de seguridad adicional: con asyncHandler en todas las rutas esto no debería

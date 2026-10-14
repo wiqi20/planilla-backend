@@ -4,6 +4,17 @@ const db = require('../db');
 const { hashPassword } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
 
+// En la empresa demo (pública) nadie puede cambiar usuarios ni datos de la empresa:
+// así un visitante no puede dejar a los demás fuera. Todo se restablece solo cada cierto tiempo.
+function bloquearEnDemo(req, res, next) {
+  if (req.esDemo && req.method !== 'GET') {
+    return res.status(403).json({ error: 'Esta acción no está disponible en la demo.' });
+  }
+  next();
+}
+router.use('/usuarios', bloquearEnDemo);
+router.use('/empresa', bloquearEnDemo);
+
 // ---------- Configuración de la empresa ----------
 
 // GET /api/admin/empresa

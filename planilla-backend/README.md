@@ -24,6 +24,21 @@ Lo que falta para la fase 2 (cuando quieras seguir): conectar el frontend
 HTML actual a esta API en vez de `localStorage`, y mover el envío de correos
 a un proveedor real (Resend, SendGrid, etc.) en vez de `mailto:`.
 
+## Servicio compartido (venta desde sticr.app)
+
+Una sola instalación atiende a todos los clientes nuevos. Cada cliente es una empresa con su
+subdominio (`minegocio.sticr.app`) y sus datos separados.
+
+- **Crear una empresa:** ya no es público. El sitio sticr.app llama a `/api/provision/empresa` cuando
+  el pago se confirma, y a `/api/provision/admin` cuando el cliente elige su usuario y contraseña.
+  Ambas exigen el encabezado `x-provision-secret` con el valor de `PROVISION_SECRET`.
+- **Suspender o reactivar:** `/api/provision/estado` según el estado de la suscripción. Una empresa
+  suspendida no puede iniciar sesión ni usar un token que ya tenía; sus datos no se borran.
+- **Demo:** con `DEMO_ENABLED=true` se crea la empresa `demo` (usuario `demo`, contraseña `demo1234`) con
+  datos de ejemplo. Se restablece cada `DEMO_RESET_HOURS` horas y no permite cambiar usuarios.
+- **Nombres reservados:** ver `src/subdominios.js`.
+- **Base compartida con otro sistema:** `DB_SCHEMA=planilla` guarda las tablas en su propio esquema.
+
 ## Estructura
 
 ```
