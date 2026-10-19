@@ -113,7 +113,17 @@ npm install
 cp .env.example .env      # y completa DATABASE_URL / JWT_SECRET
 npm run migrate           # crea las tablas
 npm run dev                # servidor con recarga automática
+ADMIN_PASSWORD='una-clave-larga' npm run seed-admin   # opcional: crea el administrador inicial (mínimo 8 caracteres, sin valor por defecto)
 ```
+
+## Pruebas
+
+```bash
+# Con una base de pruebas DESECHABLE (el nombre debe contener "test"; nunca la de producción):
+TEST_DATABASE_URL=postgresql://postgres@localhost:5432/planilla_test npm test
+```
+
+Sin `TEST_DATABASE_URL` corren solo las pruebas que no necesitan base de datos.
 
 ## Seguridad — qué SÍ y qué NO resuelve esto
 
@@ -125,8 +135,11 @@ npm run dev                # servidor con recarga automática
   aunque adivine un ID.
 - Ningún monto de dinero se calcula ni se confía del lado del navegador: el
   servidor siempre recalcula antes de guardar.
+- Límite de intentos de login reservado de forma atómica (10 por IP+usuario, 40 por IP, 100 por usuario cada 15 minutos; en memoria, una sola instancia), contraseñas
+  nuevas de mínimo 8 caracteres, cabeceras de seguridad (`helmet`) y CORS con lista de orígenes
+  (`CORS_ORIGINS`, ver `.env.example`).
+- Un token deja de servir si su usuario fue borrado o su empresa suspendida.
 
 Lo que esto todavía NO incluye (para cuando quieras seguir creciendo):
 recuperación de contraseña por correo, roles distintos dentro de una empresa
-(hoy todo usuario admin puede todo), límite de intentos de login (rate
-limiting) y auditoría de quién hizo qué cambio.
+(hoy todo usuario admin puede todo) y auditoría de quién hizo qué cambio.

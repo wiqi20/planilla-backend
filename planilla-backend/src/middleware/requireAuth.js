@@ -6,7 +6,7 @@ const db = require('../db');
 // Esto es lo que garantiza el aislamiento multi-empresa: cada query de cada
 // ruta filtra siempre por req.empresaId, nunca por un id que mande el cliente.
 //
-// También confirma en cada petición que la empresa siga activa: una cuenta suspendida
+// También confirma en cada petición que el usuario siga existiendo y que la empresa siga activa: una cuenta suspendida
 // (suscripción cancelada o sin pago) deja de funcionar aunque su token no haya expirado.
 async function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -24,12 +24,20 @@ async function requireAuth(req, res, next) {
   }
 
   try {
-    const result = await db.query('SELECT activa, es_demo FROM empresas WHERE id = $1', [payload.empresaId]);
+    // Un solo viaje: la empresa y, si existe, el usuario del token (del mismo tenant).
+    const result = await db.query(
+      `SELECT e.activa, e.es_demo, u.id AS usuario_id
+       FROM empresas e LEFT JOIN usuarios u ON u.id = $2 AND u.empresa_id = e.id
+       WHERE e.id = $1`,
+      [payload.empresaId, payload.usuarioId]
+    );
     const empresa = result.rows[0];
     if (!empresa) return res.status(401).json({ error: 'Sesión inválida o expirada' });
     if (!empresa.activa) {
       return res.status(403).json({ error: 'Esta cuenta está suspendida. Contacta a STI para reactivarla.', codigo: 'suspendida' });
     }
+    // Si el usuario fue borrado, su token deja de servir aunque no haya expirado.
+    if (!empresa.usuario_id) return res.status(401).json({ error: 'Sesión inválida o expirada' });
     req.empresaId = payload.empresaId;
     req.usuarioId = payload.usuarioId;
     req.usuarioNombre = payload.usuario;

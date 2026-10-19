@@ -37,6 +37,9 @@ router.get('/subdominio-disponible', asyncHandler(async (req, res) => {
 // duplicar: Stripe reenvía avisos, y la misma suscripción siempre da la misma empresa.
 router.post('/empresa', asyncHandler(async (req, res) => {
   const { nombreEmpresa, subdominio, stripeSubscriptionId } = req.body || {};
+  if ([nombreEmpresa, stripeSubscriptionId].some((v) => typeof v !== 'string')) {
+    return res.status(400).json({ error: 'Faltan nombreEmpresa o stripeSubscriptionId' });
+  }
   const nombre = String(nombreEmpresa || '').trim();
   const subscription = String(stripeSubscriptionId || '').trim();
   const revision = validarSubdominio(subdominio);
@@ -77,6 +80,9 @@ router.post('/empresa', asyncHandler(async (req, res) => {
 // Crea el primer administrador de la empresa. Solo funciona una vez: si ya hay usuarios, responde 409.
 router.post('/admin', asyncHandler(async (req, res) => {
   const { subdominio, stripeSubscriptionId, usuario, password } = req.body || {};
+  if ([subdominio, stripeSubscriptionId, usuario, password].some((v) => typeof v !== 'string')) {
+    return res.status(400).json({ error: 'Faltan campos requeridos' });
+  }
   const nombreUsuario = String(usuario || '').trim();
   if (!subdominio || !stripeSubscriptionId || !nombreUsuario || !password) {
     return res.status(400).json({ error: 'Faltan campos requeridos' });

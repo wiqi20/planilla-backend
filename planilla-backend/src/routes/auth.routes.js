@@ -5,6 +5,28 @@ const { hashPassword, verificarPassword, firmarToken } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
 
 const { validarSubdominio } = require('../subdominios');
+const bcrypt = require('bcryptjs');
+const { crearLimitador } = require('../limiteIntentos');
+
+// Límite de intentos de login. El intento se RESERVA al entrar (antes de la base y de bcrypt) y solo se
+// devuelve si el login acierta; así una ráfaga simultánea no pasa de `max` verificaciones por clave.
+// Tres claves, a propósito con umbrales distintos (ver entrega, hallazgo N-02):
+//  - PAR IP+usuario (estricta, 10): frena a un atacante sin bloquear a la víctima, que entra desde su IP.
+//  - IP sola (laxa, 40): frena el rociado de muchos usuarios desde una misma IP.
+//  - Usuario solo (alta, 100): freno a la fuerza bruta distribuida; umbral alto para que unos pocos
+//    fallos ajenos nunca bloqueen a la víctima.
+// La demo (demo/demo, clave pública) queda fuera del par y del usuario: nadie puede dejarla fuera; solo cuenta la IP.
+// En memoria: sirve con UNA instancia (Railway hoy). Con varias réplicas cada una contaría por separado
+// (el límite efectivo se multiplicaría): habría que mover los contadores a Postgres o Redis.
+const VENTANA_MS = (Number(process.env.LOGIN_VENTANA_MINUTOS) || 15) * 60 * 1000;
+const MAX_PAR = Number(process.env.LOGIN_MAX_INTENTOS) || 10;
+const limitePar = crearLimitador({ max: MAX_PAR, ventanaMs: VENTANA_MS });
+const limitePorIp = crearLimitador({ max: Number(process.env.LOGIN_MAX_POR_IP) || 40, ventanaMs: VENTANA_MS });
+const limitePorUsuario = crearLimitador({ max: Number(process.env.LOGIN_MAX_POR_USUARIO) || 100, ventanaMs: VENTANA_MS });
+
+// Hash falso para gastar el mismo tiempo de bcrypt cuando la empresa o el usuario no existen
+// (así la respuesta tarda parecido y no revela si existen).
+const HASH_FALSO = bcrypt.hashSync('contraseña-falsa-para-igualar-tiempos', 10);
 
 // POST /api/auth/registrar-empresa
 // Alta de un nuevo cliente de sticr.com: crea la empresa + su primer usuario administrador.
@@ -23,8 +45,8 @@ router.post('/registrar-empresa', asyncHandler(async (req, res) => {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdominioNormalizado)) {
     return res.status(400).json({ error: 'El subdominio solo puede tener letras minúsculas, números y guiones' });
   }
-  if (String(password).length < 4) {
-    return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
   }
 
   const client = await db.pool.connect();
@@ -67,17 +89,39 @@ router.post('/login', asyncHandler(async (req, res) => {
   if (!subdominio || !usuario || !password) {
     return res.status(400).json({ error: 'Faltan campos requeridos' });
   }
+  if ([subdominio, usuario, password].some((v) => typeof v !== 'string')) {
+    return res.status(400).json({ error: 'Empresa, usuario y contraseña deben ser texto' });
+  }
+
+  const claveIp = String(req.ip);
+  const claveUsuario = `${subdominio.trim().toLowerCase()}|${usuario.trim().toLowerCase()}`.slice(0, 200);
+  const esDemo = claveUsuario === 'demo|demo';
+  const claves = [[limitePorIp, claveIp]];
+  if (!esDemo) claves.push([limitePar, `${claveIp}|${claveUsuario}`], [limitePorUsuario, claveUsuario]);
+
+  const espera = Math.max(...claves.map(([l, c]) => l.bloqueadoPor(c)));
+  if (espera > 0) {
+    res.set('Retry-After', String(espera));
+    return res.status(429).json({
+      error: `Demasiados intentos fallidos. Espera ${Math.ceil(espera / 60)} minuto(s) e inténtalo de nuevo.`
+    });
+  }
+  // Reserva síncrona (sin ningún await antes): esto es lo que hace atómico el límite.
+  const recibos = claves.map(([l, c]) => [l, c, l.reservar(c)]);
+  const devolverReserva = () => recibos.forEach(([l, c, r]) => l.devolver(c, r));
 
   try {
     const empresaResult = await db.query(
       'SELECT id, nombre, subdominio, activa FROM empresas WHERE subdominio = $1',
-      [String(subdominio).trim().toLowerCase()]
+      [subdominio.trim().toLowerCase()]
     );
     const empresa = empresaResult.rows[0];
     if (!empresa) {
+      await verificarPassword(password, HASH_FALSO);
       return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
     }
     if (!empresa.activa) {
+      devolverReserva(); // no se probó ninguna contraseña
       return res.status(403).json({ error: 'Esta cuenta está suspendida. Contacta a STI para reactivarla.', codigo: 'suspendida' });
     }
 
@@ -86,19 +130,18 @@ router.post('/login', asyncHandler(async (req, res) => {
       [empresa.id, usuario]
     );
     const usuarioFila = usuarioResult.rows[0];
-    if (!usuarioFila) {
+    const passwordOk = await verificarPassword(password, usuarioFila ? usuarioFila.password_hash : HASH_FALSO);
+    if (!usuarioFila || !passwordOk) {
       return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
     }
 
-    const passwordOk = await verificarPassword(password, usuarioFila.password_hash);
-    if (!passwordOk) {
-      return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
-    }
-
+    devolverReserva(); // acierto: no cuenta
+    if (!esDemo) limitePar.olvidar(`${claveIp}|${claveUsuario}`); // quien acierta desde su IP empieza de cero
     const token = firmarToken({ empresaId: empresa.id, usuarioId: usuarioFila.id, usuario: usuarioFila.usuario });
     delete empresa.activa;
     res.json({ token, empresa, usuario: { id: usuarioFila.id, usuario: usuarioFila.usuario } });
   } catch (err) {
+    devolverReserva(); // error del servidor, no del usuario
     console.error(err);
     res.status(500).json({ error: 'Error interno al iniciar sesión' });
   }
@@ -114,3 +157,5 @@ router.get('/subdominio-disponible', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+// Solo para las pruebas: vacía los contadores de intentos.
+module.exports.reiniciarLimites = () => { limitePar.reiniciar(); limitePorIp.reiniciar(); limitePorUsuario.reiniciar(); };

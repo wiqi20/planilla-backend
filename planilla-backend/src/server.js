@@ -1,46 +1,14 @@
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-
-const requireAuth = require('./middleware/requireAuth');
-const authRoutes = require('./routes/auth.routes');
-const empleadosRoutes = require('./routes/empleados.routes');
-const colillasRoutes = require('./routes/colillas.routes');
-const reportesRoutes = require('./routes/reportes.routes');
-const boletasRoutes = require('./routes/boletas.routes');
-const adminRoutes = require('./routes/admin.routes');
-const provisionRoutes = require('./routes/provision.routes');
+const { crearApp } = require('./app');
 const { iniciarDemoProgramado } = require('./demo');
 
-const app = express();
-
-app.use(cors()); // en producción, restringe esto al dominio de tu frontend (ver README)
-app.use(express.json());
-
-app.get('/health', (req, res) => res.json({ ok: true }));
-
-// Rutas públicas (registro de empresa, login)
-app.use('/api/auth', authRoutes);
-
-// Rutas para el sitio sticr.app (crear/suspender empresas al comprar). Exigen PROVISION_SECRET.
-app.use('/api/provision', provisionRoutes);
-
-// A partir de aquí, toda ruta exige un JWT válido y queda aislada por empresa
-app.use('/api/empleados', requireAuth, empleadosRoutes);
-app.use('/api/colillas', requireAuth, colillasRoutes);
-app.use('/api/reportes', requireAuth, reportesRoutes);
-app.use('/api/boletas', requireAuth, boletasRoutes);
-app.use('/api/admin', requireAuth, adminRoutes);
-
-// Manejo de errores no capturados en rutas async (evita que el server truene)
-app.use((err, req, res, next) => {
-  console.error('Error no manejado:', err);
-  res.status(500).json({ error: 'Error interno del servidor' });
-});
+const app = crearApp();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Planilla backend escuchando en el puerto ${PORT}`);
+  const { valor, motivo } = app.locals.proxy;
+  console.log(`[aviso] trust proxy = ${valor} (${motivo}). Con false, el límite de login vería una sola IP detrás de un proxy.`);
   iniciarDemoProgramado();
 });
 
