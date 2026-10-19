@@ -30,11 +30,23 @@ function crearLimitador({ max, ventanaMs, ahora = () => Date.now() }) {
       const r = vigente(clave);
       return r && r.cuenta >= max ? Math.ceil((r.vence - ahora()) / 1000) : 0;
     },
-    registrarFallo(clave) {
+    // RESERVA un intento al entrar (antes de consultar la base y de bcrypt). Es síncrono y Node corre
+    // un solo hilo, así que 1000 peticiones simultáneas no pueden colarse: la 11.ª ya ve el contador lleno.
+    // Devuelve un recibo para `devolver`.
+    reservar(clave) {
       const r = vigente(clave);
-      if (r) { r.cuenta += 1; return; }
+      if (r) { r.cuenta += 1; return r; }
       if (registros.size >= MAX_CLAVES) limpiar();
-      registros.set(clave, { cuenta: 1, vence: ahora() + ventanaMs });
+      const nuevo = { cuenta: 1, vence: ahora() + ventanaMs };
+      registros.set(clave, nuevo);
+      return nuevo;
+    },
+    // Devuelve la reserva (login correcto). Si la ventana ya venció y se creó otra, no toca la nueva.
+    devolver(clave, recibo) {
+      if (recibo && registros.get(clave) === recibo && recibo.cuenta > 0) {
+        recibo.cuenta -= 1;
+        if (recibo.cuenta === 0) registros.delete(clave);
+      }
     },
     olvidar(clave) { registros.delete(clave); },
     reiniciar() { registros.clear(); }

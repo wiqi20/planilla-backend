@@ -13,48 +13,114 @@ const login = (subdominio, usuario, password, ip) =>
 test.before(async () => { if (!S.SIN_BASE) await S.prepararEsquema(); });
 test.after(async () => { if (!S.SIN_BASE) await S.limpiar(); });
 
-test('login: bloquea tras 10 fallos desde la misma IP (429 en español) y no afecta a otra IP', opts, async (t) => {
+const contar = (rs) => rs.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+
+test('N-01: 200 intentos CONCURRENTES contra un usuario real: como máximo 10 respuestas 401, el resto 429', opts, async (t) => {
+  const srv = await S.iniciarServidor();
+  t.after(() => srv.detener());
+  const A = await S.crearEmpresa('n1');
+  const ip = S.ipFalsa();
+  const rs = await Promise.all(Array.from({ length: 200 }, (_, i) => login(A.subdominio, A.usuario, `mala-${i}`, ip)));
+  const c = contar(rs);
+  console.log('    concurrencia, usuario real (200):', JSON.stringify(c));
+  assert.ok(c[401] <= 10, JSON.stringify(c));
+  assert.equal((c[401] || 0) + (c[429] || 0), 200, JSON.stringify(c));
+  assert.match(rs.find((r) => r.status === 429).body.error, /Demasiados intentos/);
+});
+
+test('N-01: 200 intentos CONCURRENTES contra un usuario inexistente: como máximo 10 respuestas 401', opts, async (t) => {
+  const srv = await S.iniciarServidor();
+  t.after(() => srv.detener());
+  const A = await S.crearEmpresa('n2');
+  const ip = S.ipFalsa();
+  const rs = await Promise.all(Array.from({ length: 200 }, (_, i) => login(A.subdominio, 'fantasma', `mala-${i}`, ip)));
+  const c = contar(rs);
+  console.log('    concurrencia, usuario inexistente (200):', JSON.stringify(c));
+  assert.ok(c[401] <= 10, JSON.stringify(c));
+  assert.equal((c[401] || 0) + (c[429] || 0), 200, JSON.stringify(c));
+  // empresa inexistente: misma conducta
+  const ip2 = S.ipFalsa();
+  const rs2 = await Promise.all(Array.from({ length: 50 }, (_, i) => login('o1tnoexiste', 'x', `m${i}`, ip2)));
+  assert.ok(contar(rs2)[401] <= 10);
+});
+
+test('usuario inexistente y contraseña errónea responden igual (mismo mensaje y tiempo parecido)', opts, async (t) => {
+  const srv = await S.iniciarServidor();
+  t.after(() => srv.detener());
+  const A = await S.crearEmpresa('t');
+  const medir = async (usuario) => {
+    const t0 = process.hrtime.bigint();
+    const r = await login(A.subdominio, usuario, 'mala-contraseña', S.ipFalsa());
+    return { r, ms: Number(process.hrtime.bigint() - t0) / 1e6 };
+  };
+  await medir('calentar');
+  const real = await medir(A.usuario);
+  const falso = await medir('fantasma');
+  assert.equal(real.r.status, 401); assert.equal(falso.r.status, 401);
+  assert.deepEqual(real.r.body, falso.r.body);
+  assert.ok(falso.ms > real.ms / 3, `inexistente ${falso.ms} ms vs real ${real.ms} ms: debería ejecutar bcrypt también`);
+});
+
+test('login: 10 fallos del mismo par IP+usuario dan 429 (aun con la clave correcta) y otra IP no se ve afectada', opts, async (t) => {
   const srv = await S.iniciarServidor();
   t.after(() => srv.detener());
   const A = await S.crearEmpresa('r');
   const ip = S.ipFalsa();
-  for (let i = 0; i < 10; i++) {
-    const r = await login(A.subdominio, `inexistente${i}`, 'x', ip); // usuarios distintos: solo cuenta la IP
-    assert.equal(r.status, 401);
-  }
-  const bloqueado = await login(A.subdominio, A.usuario, A.password, ip); // ni con la clave correcta
+  for (let i = 0; i < 10; i++) assert.equal((await login(A.subdominio, A.usuario, `mala-${i}`, ip)).status, 401);
+  const bloqueado = await login(A.subdominio, A.usuario, A.password, ip);
   assert.equal(bloqueado.status, 429);
   assert.match(bloqueado.body.error, /Demasiados intentos/);
   assert.ok(Number(bloqueado.headers.get('retry-after')) > 0);
-  const otraIp = await login(A.subdominio, A.usuario, A.password, S.ipFalsa());
-  assert.equal(otraIp.status, 200);
+  assert.equal((await login(A.subdominio, A.usuario, A.password, S.ipFalsa())).status, 200);
 });
 
-test('login: bloquea tras 10 fallos contra el mismo usuario aunque cambie la IP', opts, async (t) => {
+test('N-02: un atacante en la IP A que falla 50 veces contra X no impide que X entre desde la IP B', opts, async (t) => {
   const srv = await S.iniciarServidor();
   t.after(() => srv.detener());
-  const A = await S.crearEmpresa('u');
-  for (let i = 0; i < 10; i++) {
-    assert.equal((await login(A.subdominio, A.usuario, `mala-${i}`, S.ipFalsa())).status, 401);
-  }
-  const r = await login(A.subdominio, A.usuario.toUpperCase(), A.password, S.ipFalsa());
-  assert.equal(r.status, 429);
-  assert.match(r.body.error, /Demasiados intentos/);
-  // otro usuario de la misma empresa no se ve afectado
-  const otro = await login(A.subdominio, 'no-bloqueado', 'x', S.ipFalsa());
-  assert.equal(otro.status, 401);
+  const A = await S.crearEmpresa('v');
+  const ipA = S.ipFalsa();
+  const rs = [];
+  for (let i = 0; i < 50; i++) rs.push(await login(A.subdominio, A.usuario, `mala-${i}`, ipA));
+  const c = contar(rs);
+  assert.equal(c[401], 10);
+  assert.equal(c[429], 40);
+  const victima = await login(A.subdominio, A.usuario, A.password, S.ipFalsa());
+  assert.equal(victima.status, 200);
 });
 
-test('login: los aciertos no cuentan y limpian los fallos del usuario', opts, async (t) => {
+test('IP sola: 40 fallos con usuarios distintos desde una IP la bloquean (rociado); concurrente también', opts, async (t) => {
+  const srv = await S.iniciarServidor();
+  t.after(() => srv.detener());
+  const A = await S.crearEmpresa('i');
+  const ip = S.ipFalsa();
+  const rs = await Promise.all(Array.from({ length: 80 }, (_, i) => login(A.subdominio, `u${i}`, 'x', ip)));
+  const c = contar(rs);
+  assert.ok(c[401] <= 40, JSON.stringify(c));
+  assert.equal((await login(A.subdominio, A.usuario, A.password, ip)).status, 429);
+  assert.equal((await login(A.subdominio, A.usuario, A.password, S.ipFalsa())).status, 200);
+});
+
+test('usuario solo: la fuerza bruta distribuida (muchas IP) se frena en 100, no antes', opts, async (t) => {
+  const srv = await S.iniciarServidor();
+  t.after(() => srv.detener());
+  const A = await S.crearEmpresa('d2');
+  const rs = await Promise.all(Array.from({ length: 120 }, (_, i) => login(A.subdominio, A.usuario, `mala-${i}`, S.ipFalsa())));
+  const c = contar(rs);
+  console.log('    distribuido, 120 IP distintas:', JSON.stringify(c));
+  assert.equal(c[401], 100);
+  assert.equal(c[429], 20);
+});
+
+test('login: los aciertos no cuentan y limpian los fallos', opts, async (t) => {
   const srv = await S.iniciarServidor();
   t.after(() => srv.detener());
   const A = await S.crearEmpresa('k');
-  for (let ronda = 0; ronda < 3; ronda++) {
-    for (let i = 0; i < 9; i++) await login(A.subdominio, A.usuario, 'mala', S.ipFalsa());
-    assert.equal((await login(A.subdominio, A.usuario, A.password, S.ipFalsa())).status, 200);
-  }
   const ip = S.ipFalsa();
-  for (let i = 0; i < 15; i++) assert.equal((await login(A.subdominio, A.usuario, A.password, ip)).status, 200);
+  for (let ronda = 0; ronda < 3; ronda++) {
+    for (let i = 0; i < 9; i++) await login(A.subdominio, A.usuario, 'mala', ip);
+    assert.equal((await login(A.subdominio, A.usuario, A.password, ip)).status, 200);
+  }
+  for (let i = 0; i < 12; i++) assert.equal((await login(A.subdominio, A.usuario, A.password, ip)).status, 200);
 });
 
 test('login: usuarios existentes con contraseña corta siguen entrando', opts, async (t) => {
@@ -160,6 +226,13 @@ test('la empresa demo (demo / demo1234) se crea al arrancar y su login sigue fun
   }
   assert.equal(r.status, 200, r.texto);
   assert.equal((await S.api('GET', '/api/empleados', { token: r.body.token })).body.length, 6);
+  // N-02: nadie puede dejar fuera a la demo con fallos (par y usuario excluidos; solo cuenta la IP)
+  const ipAtacante = S.ipFalsa();
+  for (let i = 0; i < 60; i++) await login('demo', 'demo', `mala-${i}`, ipAtacante);
+  assert.equal((await login('demo', 'demo', 'demo1234', S.ipFalsa())).status, 200);
+  const rafaga = await Promise.all(Array.from({ length: 30 }, (_, i) => login('demo', 'demo', 'x' + i, S.ipFalsa())));
+  assert.ok(rafaga.every((x) => x.status === 401), 'la demo no se bloquea por fallos de otros');
+  assert.equal((await login('demo', 'demo', 'demo1234', S.ipFalsa())).status, 200);
   // la demo sigue siendo de solo lectura para usuarios
   assert.equal((await S.api('POST', '/api/admin/usuarios', { token: r.body.token, body: { usuario: 'otro', password: '12345678' } })).status, 403);
   // un reinicio de la demo invalida los tokens viejos (el usuario se vuelve a crear) pero se puede volver a entrar

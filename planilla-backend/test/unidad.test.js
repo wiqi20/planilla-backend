@@ -52,17 +52,30 @@ test('CORS: CORS_ORIGINS manda sobre los valores por defecto', () => {
   assert.equal(origenPermitido('*', env), false);
 });
 
-test('limitador: bloquea al llegar al máximo y se libera al vencer la ventana', () => {
+test('limitador: la reserva es inmediata, bloquea al llegar al máximo y se libera al vencer la ventana', () => {
   let t = 1000;
   const l = crearLimitador({ max: 3, ventanaMs: 60000, ahora: () => t });
-  l.registrarFallo('a'); l.registrarFallo('a');
+  l.reservar('a'); l.reservar('a');
   assert.equal(l.bloqueadoPor('a'), 0);
-  l.registrarFallo('a');
+  l.reservar('a');
   assert.ok(l.bloqueadoPor('a') > 0);
   assert.equal(l.bloqueadoPor('b'), 0);
   t += 60001;
   assert.equal(l.bloqueadoPor('a'), 0);
-  l.registrarFallo('c'); l.olvidar('c');
+});
+
+test('limitador: devolver quita la reserva, pero no toca una ventana nueva', () => {
+  let t = 1000;
+  const l = crearLimitador({ max: 2, ventanaMs: 1000, ahora: () => t });
+  const r1 = l.reservar('c'); const r2 = l.reservar('c');
+  assert.ok(l.bloqueadoPor('c') > 0);
+  l.devolver('c', r2);
+  assert.equal(l.bloqueadoPor('c'), 0);
+  t += 2000; // vence la ventana; se abre otra
+  const nueva = l.reservar('c'); l.reservar('c');
+  l.devolver('c', r1); // recibo viejo: no debe descontar de la ventana nueva
+  assert.ok(l.bloqueadoPor('c') > 0);
+  l.devolver('c', nueva);
   assert.equal(l.bloqueadoPor('c'), 0);
 });
 

@@ -135,7 +135,7 @@ Sin `TEST_DATABASE_URL` corren solo las pruebas que no necesitan base de datos.
   aunque adivine un ID.
 - Ningún monto de dinero se calcula ni se confía del lado del navegador: el
   servidor siempre recalcula antes de guardar.
-- Límite de intentos fallidos de login (10 cada 15 minutos, por IP y por usuario), contraseñas
+- Límite de intentos de login reservado de forma atómica (10 por IP+usuario, 40 por IP, 100 por usuario cada 15 minutos; en memoria, una sola instancia), contraseñas
   nuevas de mínimo 8 caracteres, cabeceras de seguridad (`helmet`) y CORS con lista de orígenes
   (`CORS_ORIGINS`, ver `.env.example`).
 - Un token deja de servir si su usuario fue borrado o su empresa suspendida.

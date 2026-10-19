@@ -5,14 +5,28 @@ const { hashPassword, verificarPassword, firmarToken } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
 
 const { validarSubdominio } = require('../subdominios');
+const bcrypt = require('bcryptjs');
 const { crearLimitador } = require('../limiteIntentos');
 
-// Límite de intentos FALLIDOS de login, por IP y por empresa+usuario. Un login correcto no cuenta
-// (así la demo pública, con clave conocida, no se bloquea sola). Configurable por entorno.
-const MAX_INTENTOS = Number(process.env.LOGIN_MAX_INTENTOS) || 10;
-const VENTANA_MIN = Number(process.env.LOGIN_VENTANA_MINUTOS) || 15;
-const limitePorIp = crearLimitador({ max: MAX_INTENTOS, ventanaMs: VENTANA_MIN * 60 * 1000 });
-const limitePorUsuario = crearLimitador({ max: MAX_INTENTOS, ventanaMs: VENTANA_MIN * 60 * 1000 });
+// Límite de intentos de login. El intento se RESERVA al entrar (antes de la base y de bcrypt) y solo se
+// devuelve si el login acierta; así una ráfaga simultánea no pasa de `max` verificaciones por clave.
+// Tres claves, a propósito con umbrales distintos (ver entrega, hallazgo N-02):
+//  - PAR IP+usuario (estricta, 10): frena a un atacante sin bloquear a la víctima, que entra desde su IP.
+//  - IP sola (laxa, 40): frena el rociado de muchos usuarios desde una misma IP.
+//  - Usuario solo (alta, 100): freno a la fuerza bruta distribuida; umbral alto para que unos pocos
+//    fallos ajenos nunca bloqueen a la víctima.
+// La demo (demo/demo, clave pública) queda fuera del par y del usuario: nadie puede dejarla fuera; solo cuenta la IP.
+// En memoria: sirve con UNA instancia (Railway hoy). Con varias réplicas cada una contaría por separado
+// (el límite efectivo se multiplicaría): habría que mover los contadores a Postgres o Redis.
+const VENTANA_MS = (Number(process.env.LOGIN_VENTANA_MINUTOS) || 15) * 60 * 1000;
+const MAX_PAR = Number(process.env.LOGIN_MAX_INTENTOS) || 10;
+const limitePar = crearLimitador({ max: MAX_PAR, ventanaMs: VENTANA_MS });
+const limitePorIp = crearLimitador({ max: Number(process.env.LOGIN_MAX_POR_IP) || 40, ventanaMs: VENTANA_MS });
+const limitePorUsuario = crearLimitador({ max: Number(process.env.LOGIN_MAX_POR_USUARIO) || 100, ventanaMs: VENTANA_MS });
+
+// Hash falso para gastar el mismo tiempo de bcrypt cuando la empresa o el usuario no existen
+// (así la respuesta tarda parecido y no revela si existen).
+const HASH_FALSO = bcrypt.hashSync('contraseña-falsa-para-igualar-tiempos', 10);
 
 // POST /api/auth/registrar-empresa
 // Alta de un nuevo cliente de sticr.com: crea la empresa + su primer usuario administrador.
@@ -80,27 +94,34 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   const claveIp = String(req.ip);
-  const claveUsuario = `${String(subdominio).trim().toLowerCase()}|${String(usuario).trim().toLowerCase()}`.slice(0, 200);
-  const espera = Math.max(limitePorIp.bloqueadoPor(claveIp), limitePorUsuario.bloqueadoPor(claveUsuario));
+  const claveUsuario = `${subdominio.trim().toLowerCase()}|${usuario.trim().toLowerCase()}`.slice(0, 200);
+  const esDemo = claveUsuario === 'demo|demo';
+  const claves = [[limitePorIp, claveIp]];
+  if (!esDemo) claves.push([limitePar, `${claveIp}|${claveUsuario}`], [limitePorUsuario, claveUsuario]);
+
+  const espera = Math.max(...claves.map(([l, c]) => l.bloqueadoPor(c)));
   if (espera > 0) {
     res.set('Retry-After', String(espera));
     return res.status(429).json({
       error: `Demasiados intentos fallidos. Espera ${Math.ceil(espera / 60)} minuto(s) e inténtalo de nuevo.`
     });
   }
-  const fallo = () => { limitePorIp.registrarFallo(claveIp); limitePorUsuario.registrarFallo(claveUsuario); };
+  // Reserva síncrona (sin ningún await antes): esto es lo que hace atómico el límite.
+  const recibos = claves.map(([l, c]) => [l, c, l.reservar(c)]);
+  const devolverReserva = () => recibos.forEach(([l, c, r]) => l.devolver(c, r));
 
   try {
     const empresaResult = await db.query(
       'SELECT id, nombre, subdominio, activa FROM empresas WHERE subdominio = $1',
-      [String(subdominio).trim().toLowerCase()]
+      [subdominio.trim().toLowerCase()]
     );
     const empresa = empresaResult.rows[0];
     if (!empresa) {
-      fallo();
+      await verificarPassword(password, HASH_FALSO);
       return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
     }
     if (!empresa.activa) {
+      devolverReserva(); // no se probó ninguna contraseña
       return res.status(403).json({ error: 'Esta cuenta está suspendida. Contacta a STI para reactivarla.', codigo: 'suspendida' });
     }
 
@@ -109,22 +130,18 @@ router.post('/login', asyncHandler(async (req, res) => {
       [empresa.id, usuario]
     );
     const usuarioFila = usuarioResult.rows[0];
-    if (!usuarioFila) {
-      fallo();
+    const passwordOk = await verificarPassword(password, usuarioFila ? usuarioFila.password_hash : HASH_FALSO);
+    if (!usuarioFila || !passwordOk) {
       return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
     }
 
-    const passwordOk = await verificarPassword(password, usuarioFila.password_hash);
-    if (!passwordOk) {
-      fallo();
-      return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
-    }
-
-    limitePorUsuario.olvidar(claveUsuario);
+    devolverReserva(); // acierto: no cuenta
+    if (!esDemo) limitePar.olvidar(`${claveIp}|${claveUsuario}`); // quien acierta desde su IP empieza de cero
     const token = firmarToken({ empresaId: empresa.id, usuarioId: usuarioFila.id, usuario: usuarioFila.usuario });
     delete empresa.activa;
     res.json({ token, empresa, usuario: { id: usuarioFila.id, usuario: usuarioFila.usuario } });
   } catch (err) {
+    devolverReserva(); // error del servidor, no del usuario
     console.error(err);
     res.status(500).json({ error: 'Error interno al iniciar sesión' });
   }
@@ -141,4 +158,4 @@ router.get('/subdominio-disponible', asyncHandler(async (req, res) => {
 
 module.exports = router;
 // Solo para las pruebas: vacía los contadores de intentos.
-module.exports.reiniciarLimites = () => { limitePorIp.reiniciar(); limitePorUsuario.reiniciar(); };
+module.exports.reiniciarLimites = () => { limitePar.reiniciar(); limitePorIp.reiniciar(); limitePorUsuario.reiniciar(); };
