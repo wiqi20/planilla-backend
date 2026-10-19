@@ -2,15 +2,19 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
+const { validar, periodoSchema } = require('../validacion');
 
 // POST /api/reportes/generar { periodoInicio, periodoFin }
 // Arma el reporte a partir de las colillas YA GUARDADAS de ese período exacto,
 // igual que hace el frontend: nunca se calculan montos nuevos aquí.
 router.post('/generar', asyncHandler(async (req, res) => {
-  const { periodoInicio, periodoFin } = req.body || {};
-  if (!periodoInicio || !periodoFin) {
+  const crudo = req.body || {};
+  if (!crudo.periodoInicio || !crudo.periodoFin) {
     return res.status(400).json({ error: 'Faltan periodoInicio o periodoFin' });
   }
+  const v = validar(periodoSchema, crudo);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const { periodoInicio, periodoFin } = v.datos;
 
   const empleadosResult = await db.query(
     'SELECT id, nombre, correo FROM empleados WHERE empresa_id = $1 AND activo = true ORDER BY nombre ASC',

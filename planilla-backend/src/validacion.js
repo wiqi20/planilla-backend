@@ -82,6 +82,11 @@ const colillaSchema = z.object({
   diasLicenciaCuido: dias('Los días de licencia de cuido')
 }).superRefine(revisarRango);
 
+const periodoSchema = z.object({
+  periodoInicio: fechaISO('periodoInicio'),
+  periodoFin: fechaISO('periodoFin')
+}).superRefine(revisarRango);
+
 const colillaFiltroSchema = z.object({
   empleadoId: idPositivo('empleadoId').optional(),
   periodoInicio: fechaISO('periodoInicio').optional(),
@@ -130,5 +135,5 @@ function idDeRuta(valor) {
 
 module.exports = {
   TOPES, FERIADO_REGEX, validar, idDeRuta, fechaISO, idPositivo,
-  colillaSchema, colillaFiltroSchema, empleadoCrearSchema, empleadoEditarSchema
+  colillaSchema, colillaFiltroSchema, periodoSchema, empleadoCrearSchema, empleadoEditarSchema
 };

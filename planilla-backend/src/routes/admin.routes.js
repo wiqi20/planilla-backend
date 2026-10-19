@@ -35,6 +35,10 @@ router.get('/empresa', asyncHandler(async (req, res) => {
 router.put('/empresa', asyncHandler(async (req, res) => {
   const { nombre, correoAdmin } = req.body || {};
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if ((nombre !== undefined && nombre !== null && (typeof nombre !== 'string' || nombre.length > 120)) ||
+      (correoAdmin !== undefined && correoAdmin !== null && (typeof correoAdmin !== 'string' || correoAdmin.length > 254))) {
+    return res.status(400).json({ error: 'El nombre y el correo deben ser texto de largo razonable' });
+  }
   if (correoAdmin && !EMAIL_REGEX.test(correoAdmin)) {
     return res.status(400).json({ error: 'El correo administrativo no tiene un formato válido' });
   }
@@ -88,6 +92,9 @@ router.put('/usuarios/:id', asyncHandler(async (req, res) => {
   const id = idDeRuta(req.params.id);
   if (id === null) return res.status(404).json({ error: 'Usuario no encontrado' });
   const { usuario, password } = req.body || {};
+  if (usuario !== undefined && usuario !== null && (typeof usuario !== 'string' || usuario.length > 40)) {
+    return res.status(400).json({ error: 'El usuario debe ser un texto de hasta 40 caracteres' });
+  }
   if (password !== undefined && password !== null && password !== '' && (typeof password !== 'string' || password.length < PASSWORD_MIN)) {
     return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN} caracteres` });
   }
