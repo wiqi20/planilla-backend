@@ -13,6 +13,9 @@ const adminRoutes = require('./routes/admin.routes');
 const provisionRoutes = require('./routes/provision.routes');
 const { opcionesCors } = require('./cors');
 const { decidirProxy } = require('./proxy');
+const { formatoError, manejadorErrores, rutaNoEncontrada, rechazarNul } = require('./errores');
+const { crearSalud } = require('./salud');
+const db = require('./db');
 
 function configurarProxy(app, env = process.env) {
   const decision = decidirProxy(env);
@@ -20,7 +23,7 @@ function configurarProxy(app, env = process.env) {
   return decision;
 }
 
-function crearApp() {
+function crearApp({ estaCerrando = () => false } = {}) {
   const app = express();
   app.locals.proxy = configurarProxy(app);
 
@@ -31,9 +34,13 @@ function crearApp() {
     crossOriginResourcePolicy: { policy: 'cross-origin' }
   }));
   app.use(cors(opcionesCors()));
-  app.use(express.json());
+  app.use(formatoError); // todo error sale como { error, mensaje }
 
-  app.get('/health', (req, res) => res.json({ ok: true }));
+  // Salud real (consulta la base). Público y antes de todo lo demás: sin sesión ni límite de intentos.
+  app.get('/health', crearSalud({ consultar: () => db.query('SELECT 1'), estaCerrando }));
+
+  app.use(express.json());
+  app.use(rechazarNul); // N-11: el byte NUL en cualquier texto es un 400, nunca un 500
 
   // Rutas públicas (registro de empresa, login)
   app.use('/api/auth', authRoutes);
@@ -48,17 +55,8 @@ function crearApp() {
   app.use('/api/boletas', requireAuth, boletasRoutes);
   app.use('/api/admin', requireAuth, adminRoutes);
 
-  // Errores: JSON mal formado o demasiado grande son culpa del cliente (400/413), no del servidor.
-  app.use((err, req, res, next) => {
-    if (err && err.type === 'entity.parse.failed') {
-      return res.status(400).json({ error: 'El cuerpo de la petición no es un JSON válido' });
-    }
-    if (err && err.type === 'entity.too.large') {
-      return res.status(413).json({ error: 'El cuerpo de la petición es demasiado grande' });
-    }
-    console.error('Error no manejado:', err);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  });
+  app.use(rutaNoEncontrada);
+  app.use(manejadorErrores);
 
   return app;
 }

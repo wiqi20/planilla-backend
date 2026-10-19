@@ -6,6 +6,8 @@ const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: Number(process.env.DB_POOL_MAX) || 10,
+  // Si la base no contesta, una petición falla en unos segundos en vez de quedarse colgada.
+  connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS) || 10000,
   // Railway/Render exigen SSL en producción pero no traen certificado propio verificable.
   ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost')
     ? false

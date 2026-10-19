@@ -3,7 +3,7 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const fs = require('node:fs');
+const { migrar } = require('../../src/migraciones');
 const { Pool } = require('pg');
 
 const RAIZ = path.join(__dirname, '..', '..');
@@ -23,8 +23,9 @@ function db() {
   return pool;
 }
 
+// Deja la base de pruebas al día con las migraciones (lo mismo que hace el servidor al arrancar).
 async function prepararEsquema() {
-  await db().query(fs.readFileSync(path.join(RAIZ, 'db', 'schema.sql'), 'utf8'));
+  await migrar(db());
 }
 
 async function limpiar() {
@@ -33,7 +34,7 @@ async function limpiar() {
   pool = null;
 }
 
-async function iniciarServidor(env = {}) {
+async function iniciarServidor(env = {}, { esperarOk = true } = {}) {
   const proceso = spawn(process.execPath, [
     '--require', path.join(__dirname, 'reloj.js'), path.join(RAIZ, 'src', 'server.js')
   ], {
@@ -56,12 +57,22 @@ async function iniciarServidor(env = {}) {
   proceso.stdout.on('data', (d) => { salida += d; });
   proceso.stderr.on('data', (d) => { salida += d; });
   for (let i = 0; i < 100; i++) {
-    try { const r = await fetch(`${BASE}/health`); if (r.ok) break; } catch { /* aún no arranca */ }
+    try { const r = await fetch(`${BASE}/health`); if (r.ok || !esperarOk) break; } catch { /* aún no arranca */ }
     await new Promise((r) => setTimeout(r, 100));
     if (i === 99) { proceso.kill(); throw new Error('El servidor no arrancó:\n' + salida); }
   }
+  let codigoSalida = null;
+  proceso.once('exit', (codigo) => { codigoSalida = codigo; });
   return {
-    detener: () => new Promise((resolve) => { proceso.once('exit', resolve); proceso.kill(); }),
+    proceso,
+    detener: () => (codigoSalida !== null ? Promise.resolve(codigoSalida)
+      : new Promise((resolve) => { proceso.once('exit', resolve); proceso.kill(); })),
+    // Espera a que el proceso termine solo (por ejemplo tras una señal) y devuelve su código de salida.
+    esperarSalida: (ms = 15000) => new Promise((resolve, rechazar) => {
+      if (codigoSalida !== null) return resolve(codigoSalida);
+      const t = setTimeout(() => rechazar(new Error('El proceso no terminó a tiempo:\n' + salida)), ms);
+      proceso.once('exit', (codigo) => { clearTimeout(t); resolve(codigo); });
+    }),
     salida: () => salida
   };
 }

@@ -26,7 +26,7 @@ async function requireAuth(req, res, next) {
   try {
     // Un solo viaje: la empresa y, si existe, el usuario del token (del mismo tenant).
     const result = await db.query(
-      `SELECT e.activa, e.es_demo, u.id AS usuario_id
+      `SELECT e.activa, e.es_demo, u.id AS usuario_id, u.token_version
        FROM empresas e LEFT JOIN usuarios u ON u.id = $2 AND u.empresa_id = e.id
        WHERE e.id = $1`,
       [payload.empresaId, payload.usuarioId]
@@ -38,6 +38,10 @@ async function requireAuth(req, res, next) {
     }
     // Si el usuario fue borrado, su token deja de servir aunque no haya expirado.
     if (!empresa.usuario_id) return res.status(401).json({ error: 'Sesión inválida o expirada' });
+    // S-05: si la contraseña cambió después de emitir el token, la versión no coincide y el token no sirve.
+    // Los tokens emitidos antes de existir `tv` cuentan como versión 0 (siguen valiendo hasta el primer cambio).
+    const versionToken = payload.tv === undefined ? 0 : payload.tv; // cualquier otro valor raro no coincide y se rechaza
+    if (versionToken !== empresa.token_version) return res.status(401).json({ error: 'Sesión inválida o expirada' });
     req.empresaId = payload.empresaId;
     req.usuarioId = payload.usuarioId;
     req.usuarioNombre = payload.usuario;
