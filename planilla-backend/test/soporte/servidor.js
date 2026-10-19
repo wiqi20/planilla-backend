@@ -7,7 +7,9 @@ const { migrar } = require('../../src/migraciones');
 const { Pool } = require('pg');
 
 const RAIZ = path.join(__dirname, '..', '..');
-const PUERTO = 4501;
+// Puerto del servidor de pruebas: TEST_PORT, o uno derivado del pid del proceso de prueba para que dos corridas
+// simultáneas (otro revisor, otra terminal) no choquen. Cada archivo de prueba corre en su propio proceso.
+const PUERTO = Number(process.env.TEST_PORT) || 20000 + (process.pid % 20000);
 const BASE = `http://127.0.0.1:${PUERTO}`;
 const PROVISION_SECRET = 'secreto-de-pruebas-0123456789-abcdef';
 const URL_DB = process.env.TEST_DATABASE_URL;
@@ -34,7 +36,8 @@ async function limpiar() {
   pool = null;
 }
 
-async function iniciarServidor(env = {}, { esperarOk = true } = {}) {
+// Lanza el servidor sin esperar a que responda.
+function lanzar(env = {}) {
   const proceso = spawn(process.execPath, [
     '--require', path.join(__dirname, 'reloj.js'), path.join(RAIZ, 'src', 'server.js')
   ], {
@@ -56,11 +59,6 @@ async function iniciarServidor(env = {}, { esperarOk = true } = {}) {
   let salida = '';
   proceso.stdout.on('data', (d) => { salida += d; });
   proceso.stderr.on('data', (d) => { salida += d; });
-  for (let i = 0; i < 100; i++) {
-    try { const r = await fetch(`${BASE}/health`); if (r.ok || !esperarOk) break; } catch { /* aún no arranca */ }
-    await new Promise((r) => setTimeout(r, 100));
-    if (i === 99) { proceso.kill(); throw new Error('El servidor no arrancó:\n' + salida); }
-  }
   let codigoSalida = null;
   proceso.once('exit', (codigo) => { codigoSalida = codigo; });
   return {
@@ -75,6 +73,16 @@ async function iniciarServidor(env = {}, { esperarOk = true } = {}) {
     }),
     salida: () => salida
   };
+}
+
+async function iniciarServidor(env = {}, { esperarOk = true } = {}) {
+  const srv = lanzar(env);
+  for (let i = 0; i < 100; i++) {
+    try { const r = await fetch(`${BASE}/health`); if (r.ok || !esperarOk) break; } catch { /* aún no arranca */ }
+    await new Promise((r) => setTimeout(r, 100));
+    if (i === 99) { srv.proceso.kill(); throw new Error('El servidor no arrancó:\n' + srv.salida()); }
+  }
+  return srv;
 }
 
 // Llama a la API. Devuelve { status, body, headers }.
@@ -122,4 +130,4 @@ async function crearEmpleado(token, extra = {}) {
   return r.body;
 }
 
-module.exports = { BASE, PUERTO, RAIZ, SIN_BASE, PROVISION_SECRET, db, prepararEsquema, limpiar, iniciarServidor, api, ipFalsa, crearEmpresa, crearEmpleado };
+module.exports = { lanzar, BASE, PUERTO, RAIZ, SIN_BASE, PROVISION_SECRET, db, prepararEsquema, limpiar, iniciarServidor, api, ipFalsa, crearEmpresa, crearEmpleado };

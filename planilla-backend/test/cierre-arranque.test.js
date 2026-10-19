@@ -2,7 +2,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const net = require('node:net');
+const { Pool } = require('pg');
 const S = require('./soporte/servidor');
+const { crearCierre } = require('../src/cierre');
 
 const opts = { skip: S.SIN_BASE };
 const ESQUEMA = 'arranque_test';
@@ -71,4 +74,32 @@ test('las peticiones en vuelo durante SIGTERM se completan antes de salir', opts
   const estados = await Promise.all(enVuelo.map((p) => p.respuesta));
   assert.deepEqual(estados, [401, 401, 401, 401, 401, 401], 'cada petición recibió su respuesta completa');
   assert.equal(await srv.esperarSalida(), 0);
+});
+
+test('H-1: si el puerto está ocupado, el servicio registra el error y sale con código 1 (no queda vivo y mudo)', opts, async () => {
+  const ocupante = net.createServer();
+  await new Promise((r) => ocupante.listen(S.PUERTO, '0.0.0.0', r));
+  try {
+    const srv = S.lanzar({ DB_SCHEMA: ESQUEMA });
+    assert.equal(await srv.esperarSalida(20000), 1);
+    assert.match(srv.salida(), /No se pudo abrir el puerto \d+: EADDRINUSE/);
+  } finally {
+    await new Promise((r) => ocupante.close(r));
+  }
+});
+
+test('M1: con una consulta colgada (pg_sleep) el apagado respeta el tope y se da por forzado', opts, async () => {
+  const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL, ssl: false, max: 2 });
+  const cliente = await pool.connect();
+  cliente.query('SELECT pg_sleep(60)').catch(() => {}); // consulta que no termina
+  await new Promise((r) => setTimeout(r, 100));
+  const servidor = http.createServer((req, res) => res.end('ok'));
+  await new Promise((r) => servidor.listen(0, '127.0.0.1', r));
+  const cierre = crearCierre({ servidor, pool, timeoutMs: 300, poolMs: 400, log: () => {} });
+  const t0 = Date.now();
+  const r = await cierre.cerrar('SIGTERM');
+  const dur = Date.now() - t0;
+  assert.deepEqual(r, { forzado: true });
+  assert.ok(dur < 2500, `tardó ${dur} ms; sin el plazo del pool esperaría los 60 s de la consulta`);
+  cliente.release(true); // limpieza: destruye la conexión colgada
 });

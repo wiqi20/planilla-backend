@@ -24,6 +24,13 @@ async function main() {
     iniciarDemoProgramado();
   });
 
+  // H-1: si no se puede abrir el puerto (EADDRINUSE, EACCES...) el servicio no puede servir: se sale con
+  // código 1 para que la plataforma lo reinicie. Sin esto, el manejador de uncaughtException lo dejaría vivo y mudo.
+  servidor.on('error', (err) => {
+    console.error(`No se pudo abrir el puerto ${PORT}: ${err.code || err.message}`);
+    process.exit(1);
+  });
+
   cierre = crearCierre({ servidor, pool: db.pool });
   let yaRecibida = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {

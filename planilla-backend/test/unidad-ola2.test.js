@@ -5,7 +5,7 @@ const http = require('node:http');
 const { crearLimitador } = require('../src/limiteIntentos');
 const { crearCierre } = require('../src/cierre');
 const { crearSalud } = require('../src/salud');
-const { formatoError, contieneNul, mensajeDe } = require('../src/errores');
+const { formatoError, contieneNul, mensajeDe, manejadorErrores } = require('../src/errores');
 
 // ---------- N-12 ----------
 test('N-12: devolver es idempotente, aunque se repita muchas veces y a la vez', async () => {
@@ -126,4 +126,85 @@ test('formatoError agrega "mensaje" a cualquier error sin tocar "error" ni los c
   assert.deepEqual(salida[1], { error: 'esto no es un error HTTP' });
   assert.deepEqual(salida[2], { ok: true });
   assert.deepEqual(salida[3], { error: 'Texto propio', mensaje: 'Ya traía mensaje' });
+});
+
+// ---------- H-3: /health con una sola comprobación y resultado reutilizado ----------
+test('/health: las llamadas simultáneas comparten una sola consulta y el resultado se reutiliza ~3 s', async () => {
+  let consultas = 0; let t = 1000; let falla = false;
+  let liberar;
+  const consultar = () => { consultas++; return falla ? Promise.reject(new Error('x')) : new Promise((r) => { liberar = r; }); };
+  const salud = crearSalud({ consultar, cacheMs: 3000, timeoutMs: 5000, ahora: () => t });
+
+  const rafaga = Array.from({ length: 200 }, () => llamarSalud(salud));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(consultas, 1, 'ráfaga de 200: una sola consulta a la base');
+  liberar();
+  assert.ok((await Promise.all(rafaga)).every((r) => r.status === 200));
+
+  t += 2000; // dentro de los 3 s: no consulta otra vez
+  assert.equal((await llamarSalud(salud)).status, 200);
+  assert.equal(consultas, 1);
+
+  t += 1500; // ya pasaron más de 3 s: consulta otra vez (y ahora la base falla)
+  falla = true;
+  assert.equal((await llamarSalud(salud)).status, 503);
+  assert.equal(consultas, 2);
+  t += 1000; // el fallo también se reutiliza
+  assert.equal((await llamarSalud(salud)).status, 503);
+  assert.equal(consultas, 2);
+  t += 3000;
+  falla = false;
+  const otra = llamarSalud(salud);
+  await new Promise((r) => setTimeout(r, 10));
+  liberar();
+  assert.equal((await otra).status, 200, 'se recupera cuando la base vuelve');
+  assert.equal(consultas, 3);
+});
+
+test('/health: «apagando» tiene prioridad sobre el resultado guardado', async () => {
+  let cerrando = false;
+  const salud = crearSalud({ consultar: async () => ({}), estaCerrando: () => cerrando });
+  assert.equal((await llamarSalud(salud)).status, 200);
+  cerrando = true;
+  const r = await llamarSalud(salud);
+  assert.equal(r.status, 503);
+  assert.equal(r.body.estado, 'apagando');
+});
+
+// ---------- B1: conexiones keep-alive inactivas ----------
+test('cierre: una conexión keep-alive que queda inactiva no retrasa el apagado', async () => {
+  const servidor = await servidorLento(250);
+  const agente = new http.Agent({ keepAlive: true });
+  const url = `http://127.0.0.1:${puerto(servidor)}/`;
+  const peticion = new Promise((resolve, rechazar) => {
+    http.get(url, { agent: agente }, (res) => { res.resume(); res.on('end', resolve); }).on('error', rechazar);
+  });
+  await new Promise((r) => setTimeout(r, 50)); // la petición está en vuelo
+  const cierre = crearCierre({ servidor, pool: { end: async () => {} }, timeoutMs: 8000, log: () => {} });
+  const t0 = Date.now();
+  const cerrado = cierre.cerrar('SIGTERM');
+  await peticion; // termina bien; su conexión queda abierta (keep-alive) pero inactiva
+  assert.deepEqual(await cerrado, { forzado: false });
+  assert.ok(Date.now() - t0 < 2000, `tardó ${Date.now() - t0} ms: no debe esperar el tiempo de inactividad (varios segundos)`);
+  agente.destroy();
+});
+
+// ---------- B2: respaldo de los códigos de Postgres del byte NUL ----------
+test('manejadorErrores: los códigos 22021 y 22P05 de Postgres son 400; cualquier otro error de datos sigue siendo 500', () => {
+  const llamar = (err) => {
+    let salida;
+    const res = { headersSent: false, statusCode: 200, status(c) { this.statusCode = c; return this; }, json(b) { salida = { status: this.statusCode, body: b }; return this; } };
+    const silencio = console.error; console.error = () => {};
+    try { manejadorErrores(err, {}, res, () => {}); } finally { console.error = silencio; }
+    return salida;
+  };
+  for (const code of ['22021', '22P05']) {
+    const r = llamar(Object.assign(new Error('detalle interno de postgres'), { code }));
+    assert.equal(r.status, 400, code);
+    assert.equal(typeof r.body.mensaje, 'string');
+    assert.doesNotMatch(JSON.stringify(r.body), /postgres|detalle/i);
+  }
+  for (const code of ['22P02', '23505', '42P01', undefined]) {
+    assert.equal(llamar(Object.assign(new Error('x'), { code })).status, 500, String(code));
+  }
 });

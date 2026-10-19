@@ -233,3 +233,10 @@ test('/health: 503 sin datos sensibles cuando la base no responde', opts, async 
     srv = await S.iniciarServidor();
   }
 });
+
+// Confirma contra Postgres real que los códigos del respaldo de N-11 son los que de verdad devuelve con un NUL.
+test('N-11 (respaldo): Postgres devuelve 22021 (texto) y 22P05 (jsonb) con un byte NUL', opts, async () => {
+  const codigo = async (sql, params) => { try { await S.db().query(sql, params); return null; } catch (e) { return e.code; } };
+  assert.equal(await codigo('SELECT $1::text', [`a${NUL}b`]), '22021');
+  assert.equal(await codigo("SELECT '\"\\u0000\"'::jsonb"), '22P05');
+});

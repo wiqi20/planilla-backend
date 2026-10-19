@@ -102,7 +102,7 @@ configuración, y soporta dominios personalizados (lo que necesitas para que
    ```
    curl https://algo.up.railway.app/health
    ```
-   Debe responder `{"estado":"ok"}` (consulta la base; si no contesta, responde 503).
+   Debe responder `{"estado":"ok"}` (consulta la base; si no contesta, responde 503). **Ya no devuelve `{"ok":true}`:** configura el healthcheck de Railway para mirar solo el código HTTP.
 9. **Dominio propio**: en **Settings → Networking → Custom Domain**, agrega
    por ejemplo `api.sticr.com` y sigue las instrucciones para el registro
    CNAME en tu proveedor de DNS. Ahí es donde tu frontend (en cada subdominio
@@ -121,6 +121,13 @@ npm run dev                # servidor con recarga automática
 ADMIN_PASSWORD='una-clave-larga' npm run seed-admin   # opcional: crea el administrador inicial (mínimo 8 caracteres, sin valor por defecto)
 ```
 
+## Orden de despliegue (importante)
+
+El frontend que guarda el campo `token` de `PUT /api/admin/usuarios/:id` (cuando alguien cambia su PROPIA clave)
+debe desplegarse **antes o junto con** este backend. Si el backend sale primero, quien cambie su propia clave
+queda con un token anulado y es expulsado de su sesión. Las migraciones son aditivas, así que la versión anterior
+del código sigue funcionando sobre la base ya migrada.
+
 ## Pruebas
 
 ```bash
@@ -128,6 +135,7 @@ ADMIN_PASSWORD='una-clave-larga' npm run seed-admin   # opcional: crea el admini
 TEST_DATABASE_URL=postgresql://postgres@localhost:5432/planilla_test npm test
 ```
 
+El servidor de pruebas usa un puerto derivado del proceso (o `TEST_PORT` si lo defines), así que dos corridas simultáneas no chocan.
 Sin `TEST_DATABASE_URL` corren solo las pruebas que no necesitan base de datos.
 
 ## Seguridad — qué SÍ y qué NO resuelve esto

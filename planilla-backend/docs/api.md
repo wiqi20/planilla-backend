@@ -56,6 +56,9 @@ Regla para tokens anteriores a esta versión: un token sin `tv` cuenta como vers
 
 #### `GET /health` — Público, sin límite de intentos
 Hace `SELECT 1` a la base con un tiempo máximo (`HEALTH_TIMEOUT_MS`, 2 s por defecto). No devuelve versiones, direcciones ni detalles.
+Solo hay una comprobación a la vez: las llamadas simultáneas comparten la que está en curso y su resultado (bueno o malo) se reutiliza unos 3 s, así que este endpoint no puede usarse para agotar el pool de la base. El estado "apagando" no usa el resultado guardado.
+
+**Compatibilidad:** ya no devuelve `{ "ok": true }`. Quien lo consulte (por ejemplo el healthcheck de Railway) debe mirar **solo el código HTTP** (200 o 503), no el cuerpo.
 
 - `200` `{ "estado": "ok" }`
 - `503` `{ "estado": "sin-base" | "apagando", "error": "Servicio no disponible", "mensaje": "El servicio no está disponible en este momento." }` — la base no contestó a tiempo o falló, o el servicio está apagándose (SIGTERM/SIGINT).
@@ -195,6 +198,7 @@ Cuerpo: `{ "usuario": string (≤40), "password": string (mín. 8) }`.
 #### `PUT /api/admin/usuarios/:id`
 Cuerpo: `{ "usuario"?: string (≤40), "password"?: string (mín. 8) }`.
 - `200` `{ id, usuario, creado_en }`. Si se envió `password`, **se cierran todas las sesiones de ese usuario** (ver "Sesiones y cambio de contraseña"). Si quien cambia la contraseña es el propio usuario, la respuesta trae además `"token"` (un token nuevo válido) para que su sesión actual no se corte; si la cambia otro administrador, no.
+- **Orden de despliegue:** el frontend que guarda ese `token` nuevo al cambiar la PROPIA clave debe desplegarse **antes o junto con** este backend. Si el backend sale primero, quien cambie su propia clave quedará con un token que ya no sirve y será expulsado de su sesión.
 - `400` · `404` `Usuario no encontrado` (también si es de otra empresa) · `409` nombre repetido
 
 #### `DELETE /api/admin/usuarios/:id`
@@ -203,5 +207,6 @@ Cuerpo: `{ "usuario"?: string (≤40), "password"?: string (mín. 8) }`.
 ## Operación
 
 - **Migraciones:** `db/migrations/NNN_nombre.sql`, aplicadas en orden y cada una en su transacción; se registran en `schema_migrations` con checksum. Corren solas al arrancar (si fallan, el servicio no inicia) o con `npm run migrate`.
-- **Apagado ordenado:** con `SIGTERM`/`SIGINT` deja de aceptar conexiones (y `/health` responde 503 `apagando`), termina las peticiones en curso hasta `SHUTDOWN_TIMEOUT_MS` (10 s por defecto), cierra el pool y sale con código 0 (1 si tuvo que cortar peticiones). Una segunda señal sale de inmediato.
+- **Apagado ordenado:** con `SIGTERM`/`SIGINT` deja de aceptar conexiones (y `/health` responde 503 `apagando`), termina las peticiones en curso hasta `SHUTDOWN_TIMEOUT_MS` (10 s por defecto), cierra las conexiones inactivas, cierra el pool (espera como máximo 1 s más; una consulta colgada no lo bloquea) y sale con código 0 (1 si tuvo que cortar peticiones o el pool no cerró). Una segunda señal sale de inmediato.
+- **Puerto ocupado:** si no puede abrir el puerto (`EADDRINUSE`, etc.), registra el error y sale con código 1.
 - Variables de entorno: ver `.env.example`.
