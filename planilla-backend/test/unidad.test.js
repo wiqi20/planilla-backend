@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const { hoyCR, esFechaISOValida } = require('../src/fechas');
 const { origenPermitido } = require('../src/cors');
 const { crearLimitador } = require('../src/limiteIntentos');
+const { decidirProxy } = require('../src/proxy');
 const { validar, colillaSchema, empleadoCrearSchema, FERIADO_REGEX } = require('../src/validacion');
 
 test('hoyCR usa la zona de Costa Rica (UTC-6), no UTC', () => {
@@ -108,4 +109,18 @@ test('empleado: salario, correo, nombre, fecha y vacaciones', () => {
     { vacacionesDisponibles: -1 }, { vacacionesDisponibles: 91 }, { vacacionesDisponibles: 'x' }]) {
     assert.equal(validar(empleadoCrearSchema, { ...ok, ...mal }).ok, false, JSON.stringify(mal).slice(0, 60));
   }
+});
+
+test('trust proxy: prioridad TRUST_PROXY > Railway > NODE_ENV > false', () => {
+  assert.equal(decidirProxy({ TRUST_PROXY: '2', RAILWAY_PROJECT_ID: 'x' }).valor, 2);
+  assert.equal(decidirProxy({ TRUST_PROXY: '0', RAILWAY_PROJECT_ID: 'x', NODE_ENV: 'production' }).valor, false);
+  assert.equal(decidirProxy({ TRUST_PROXY: 'abc', RAILWAY_PROJECT_ID: 'x' }).valor, false);
+  for (const v of ['RAILWAY_PROJECT_ID', 'RAILWAY_ENVIRONMENT_ID', 'RAILWAY_SERVICE_ID', 'RAILWAY_ENVIRONMENT', 'RAILWAY_ENVIRONMENT_NAME']) {
+    const d = decidirProxy({ [v]: 'valor' });
+    assert.equal(d.valor, 1, v);
+    assert.match(d.motivo, new RegExp(v));
+  }
+  assert.equal(decidirProxy({ NODE_ENV: 'production' }).valor, 1);
+  assert.equal(decidirProxy({ NODE_ENV: 'development' }).valor, false);
+  assert.equal(decidirProxy({}).valor, false);
 });

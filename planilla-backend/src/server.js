@@ -7,6 +7,8 @@ const app = crearApp();
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Planilla backend escuchando en el puerto ${PORT}`);
+  const { valor, motivo } = app.locals.proxy;
+  console.log(`[aviso] trust proxy = ${valor} (${motivo}). Con false, el límite de login vería una sola IP detrás de un proxy.`);
   iniciarDemoProgramado();
 });
 

@@ -12,24 +12,17 @@ const boletasRoutes = require('./routes/boletas.routes');
 const adminRoutes = require('./routes/admin.routes');
 const provisionRoutes = require('./routes/provision.routes');
 const { opcionesCors } = require('./cors');
+const { decidirProxy } = require('./proxy');
 
-// Cuántos proxies hay delante del servicio. En Railway hay uno (su balanceador), que agrega la IP real
-// del cliente al final de X-Forwarded-For; con `1` Express toma esa IP y no la del proxy. Sin esto el
-// límite de intentos de login contaría a todo el mundo como una sola IP (la del proxy). Si el servicio
-// se corre sin proxy (local), es `false` para que nadie pueda inventar su IP con esa cabecera.
-// TRUST_PROXY permite cambiarlo (0, 1, 2...) si se agrega otro proxy, por ejemplo un CDN.
 function configurarProxy(app, env = process.env) {
-  if (env.TRUST_PROXY !== undefined && env.TRUST_PROXY !== '') {
-    const n = Number(env.TRUST_PROXY);
-    app.set('trust proxy', Number.isInteger(n) && n >= 0 ? (n === 0 ? false : n) : false);
-  } else {
-    app.set('trust proxy', env.NODE_ENV === 'production' ? 1 : false);
-  }
+  const decision = decidirProxy(env);
+  app.set('trust proxy', decision.valor);
+  return decision;
 }
 
 function crearApp() {
   const app = express();
-  configurarProxy(app);
+  app.locals.proxy = configurarProxy(app);
 
   // API JSON: nada de contenido activo ni de ser incrustada en marcos. helmet también quita X-Powered-By.
   // CORP "cross-origin" porque los frontends (otros subdominios) leen las respuestas con fetch.

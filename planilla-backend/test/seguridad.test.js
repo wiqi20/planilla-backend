@@ -188,3 +188,13 @@ test('seed-admin: con ADMIN_PASSWORD válida crea el administrador y no imprime 
   const fila = await S.db().query("SELECT u.password_hash FROM usuarios u JOIN empresas e ON e.id = u.empresa_id WHERE e.subdominio = 'o1tseed'");
   assert.equal(await bcrypt.compare(clave, fila.rows[0].password_hash), true);
 });
+
+test('arranque: escribe en el log qué trust proxy quedó activo y por qué', opts, async () => {
+  let srv = await S.iniciarServidor({ TRUST_PROXY: '', RAILWAY_PROJECT_ID: 'proyecto-de-prueba', NODE_ENV: 'development' });
+  assert.match(srv.salida(), /\[aviso\] trust proxy = 1 \(se detectó Railway \(RAILWAY_PROJECT_ID\)\)/);
+  assert.doesNotMatch(srv.salida(), /proyecto-de-prueba/);
+  await srv.detener();
+  srv = await S.iniciarServidor({ TRUST_PROXY: '' });
+  assert.match(srv.salida(), /\[aviso\] trust proxy = false/);
+  await srv.detener();
+});
