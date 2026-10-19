@@ -2,13 +2,16 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
+const { hoyCR, esFechaISOValida } = require('../fechas');
+const { idDeRuta } = require('../validacion');
 
 // Límite generoso pero acotado para la imagen de la boleta firmada (base64 en texto).
 // ~2,000,000 caracteres de base64 ≈ 1.5 MB de imagen real.
 const MAX_FIRMA_LENGTH = 2_000_000;
 
+// "Hoy" según Costa Rica (UTC-6). Con la fecha UTC, desde las 6:00 p. m. ya sería "mañana".
 function hoyISO() {
-  return new Date().toISOString().slice(0, 10);
+  return hoyCR();
 }
 
 // domingo = 0 en JS Date; lunes a sábado son días laborales para este calendario.
@@ -31,6 +34,7 @@ function validarDatos(body, empleado, diasVacacionesPrevios) {
   const diasDisfrutar = Number(body.diasDisfrutar);
   const { periodoInicio, periodoFin } = body;
   if (!periodoInicio || !periodoFin) return 'Faltan las fechas del rango a disfrutar';
+  if (!esFechaISOValida(periodoInicio) || !esFechaISOValida(periodoFin)) return 'Las fechas del rango deben ser válidas (AAAA-MM-DD)';
   if (periodoFin < periodoInicio) return 'El rango de fechas no es válido';
   if (periodoInicio < hoyISO()) return 'El rango de fechas a disfrutar no puede ser anterior a la fecha actual';
   if (esDomingo(periodoInicio) || esDomingo(periodoFin)) {
@@ -58,6 +62,8 @@ function validarDatos(body, empleado, diasVacacionesPrevios) {
 router.post('/generar', asyncHandler(async (req, res) => {
   const { empleadoId, diasDisfrutar, periodoInicio, periodoFin } = req.body || {};
   if (!empleadoId) return res.status(400).json({ error: 'Falta empleadoId' });
+  const empleadoIdNum = idDeRuta(empleadoId);
+  if (empleadoIdNum === null) return res.status(400).json({ error: 'empleadoId debe ser un número entero positivo' });
 
   const client = await db.pool.connect();
   try {
@@ -65,7 +71,7 @@ router.post('/generar', asyncHandler(async (req, res) => {
 
     const empleadoResult = await client.query(
       'SELECT * FROM empleados WHERE id = $1 AND empresa_id = $2 FOR UPDATE',
-      [empleadoId, req.empresaId]
+      [empleadoIdNum, req.empresaId]
     );
     const empleado = empleadoResult.rows[0];
     if (!empleado) {
@@ -106,7 +112,15 @@ router.post('/generar', asyncHandler(async (req, res) => {
 
 // GET /api/boletas?empleadoId=&periodoInicio=&periodoFin=
 router.get('/', asyncHandler(async (req, res) => {
-  const { periodoInicio, periodoFin, empleadoId } = req.query;
+  const { periodoInicio, periodoFin } = req.query;
+  let empleadoId;
+  if (req.query.empleadoId) {
+    empleadoId = idDeRuta(req.query.empleadoId);
+    if (empleadoId === null) return res.status(400).json({ error: 'empleadoId debe ser un número entero positivo' });
+  }
+  if ((periodoInicio && !esFechaISOValida(periodoInicio)) || (periodoFin && !esFechaISOValida(periodoFin))) {
+    return res.status(400).json({ error: 'Las fechas del filtro deben ser válidas (AAAA-MM-DD)' });
+  }
   const condiciones = ['b.empresa_id = $1'];
   const valores = [req.empresaId];
 
@@ -132,7 +146,8 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // GET /api/boletas/:id/firma -> la imagen completa, solo cuando se necesita ver/imprimir una boleta puntual
 router.get('/:id/firma', asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const id = idDeRuta(req.params.id);
+  if (id === null) return res.status(404).json({ error: 'Boleta no encontrada' });
   const result = await db.query(
     'SELECT firma_imagen FROM boletas_vacaciones WHERE id = $1 AND empresa_id = $2',
     [id, req.empresaId]
@@ -146,7 +161,8 @@ router.get('/:id/firma', asyncHandler(async (req, res) => {
 // boleta original se restauran temporalmente para validar y aplicar solo la
 // diferencia contra el saldo del colaborador (mismo patrón que colillas/guardar).
 router.put('/:id', asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const id = idDeRuta(req.params.id);
+  if (id === null) return res.status(404).json({ error: 'Boleta no encontrada' });
   const { diasDisfrutar, periodoInicio, periodoFin } = req.body || {};
 
   const client = await db.pool.connect();
@@ -212,7 +228,8 @@ router.put('/:id', asyncHandler(async (req, res) => {
 // Adjunta (o reemplaza) la imagen de la boleta ya firmada, como comprobante.
 // No afecta fechas/días/saldo: es solo evidencia de firma.
 router.put('/:id/firma', asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const id = idDeRuta(req.params.id);
+  if (id === null) return res.status(404).json({ error: 'Boleta no encontrada' });
   const { firmaImagen } = req.body || {};
   if (!firmaImagen || typeof firmaImagen !== 'string') {
     return res.status(400).json({ error: 'Falta la imagen de la boleta firmada' });
