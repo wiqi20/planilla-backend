@@ -3,14 +3,17 @@ const router = express.Router();
 const db = require('../db');
 const { calcularPlanilla } = require('../calculo');
 const asyncHandler = require('../utils/asyncHandler');
+const { validar, colillaSchema, colillaFiltroSchema } = require('../validacion');
 
-function extraerInputs(body) {
-  const campos = [
-    'horasExtra', 'horasSinGoce', 'diasVacaciones', 'diasSinGoceCompletos',
-    'diasIncapacidad', 'diasLicenciaMP', 'diasLicenciaCuido', 'horasFeriado'
-  ];
+const CAMPOS_INPUT = [
+  'horasExtra', 'horasSinGoce', 'diasVacaciones', 'diasSinGoceCompletos',
+  'diasIncapacidad', 'diasLicenciaMP', 'diasLicenciaCuido', 'horasFeriado'
+];
+
+// Toma del cuerpo ya validado solo los campos que usa el cálculo.
+function extraerInputs(datos) {
   const inputs = {};
-  campos.forEach(c => { inputs[c] = Number(body[c]) || 0; });
+  CAMPOS_INPUT.forEach(c => { inputs[c] = datos[c]; });
   return inputs;
 }
 
@@ -18,10 +21,13 @@ function extraerInputs(body) {
 // Solo calcula y devuelve el resultado (vista previa). No guarda nada todavía,
 // igual que el botón "Calcular colilla" del frontend.
 router.post('/calcular', asyncHandler(async (req, res) => {
-  const { empleadoId, periodoInicio, periodoFin, feriadoNombre } = req.body || {};
-  if (!empleadoId || !periodoInicio || !periodoFin) {
+  const crudo = req.body || {};
+  if (!crudo.empleadoId || !crudo.periodoInicio || !crudo.periodoFin) {
     return res.status(400).json({ error: 'Faltan empleadoId, periodoInicio o periodoFin' });
   }
+  const v = validar(colillaSchema, crudo);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const { empleadoId, feriadoNombre } = v.datos;
 
   const empleadoResult = await db.query(
     'SELECT * FROM empleados WHERE id = $1 AND empresa_id = $2',
@@ -30,7 +36,7 @@ router.post('/calcular', asyncHandler(async (req, res) => {
   const empleado = empleadoResult.rows[0];
   if (!empleado) return res.status(404).json({ error: 'Colaborador no encontrado' });
 
-  const inputs = extraerInputs(req.body);
+  const inputs = extraerInputs(v.datos);
 
   if (inputs.diasVacaciones > Number(empleado.vacaciones_disponibles)) {
     return res.status(400).json({
@@ -43,17 +49,20 @@ router.post('/calcular', asyncHandler(async (req, res) => {
   }
 
   const resultado = calcularPlanilla(Number(empleado.salario), inputs);
-  res.json({ empleado: { id: empleado.id, nombre: empleado.nombre, correo: empleado.correo }, inputs, feriadoNombre: feriadoNombre || '', resultado });
+  res.json({ empleado: { id: empleado.id, nombre: empleado.nombre, correo: empleado.correo }, inputs, feriadoNombre, resultado });
 }));
 
 // POST /api/colillas/guardar
 // Recalcula desde cero en el servidor (nunca confía en los montos que mande el cliente),
 // descuenta vacaciones si corresponde, y guarda la colilla del período.
 router.post('/guardar', asyncHandler(async (req, res) => {
-  const { empleadoId, periodoInicio, periodoFin, feriadoNombre } = req.body || {};
-  if (!empleadoId || !periodoInicio || !periodoFin) {
+  const crudo = req.body || {};
+  if (!crudo.empleadoId || !crudo.periodoInicio || !crudo.periodoFin) {
     return res.status(400).json({ error: 'Faltan empleadoId, periodoInicio o periodoFin' });
   }
+  const v = validar(colillaSchema, crudo);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const { empleadoId, periodoInicio, periodoFin, feriadoNombre } = v.datos;
 
   const client = await db.pool.connect();
   try {
@@ -69,7 +78,7 @@ router.post('/guardar', asyncHandler(async (req, res) => {
       return res.status(404).json({ error: 'Colaborador no encontrado' });
     }
 
-    const inputs = extraerInputs(req.body);
+    const inputs = extraerInputs(v.datos);
 
     // Si ya existía una colilla guardada para este empleado+período (se está
     // corrigiendo una colilla previa), sus días de vacaciones ya fueron
@@ -105,7 +114,7 @@ router.post('/guardar', asyncHandler(async (req, res) => {
       );
     }
 
-    const datos = { ...inputs, feriadoNombre: feriadoNombre || '', ...resultado, empleadoNombre: empleado.nombre, empleadoCorreo: empleado.correo };
+    const datos = { ...inputs, feriadoNombre, ...resultado, empleadoNombre: empleado.nombre, empleadoCorreo: empleado.correo };
 
     // Si ya existía una colilla para este empleado+período, se sobreescribe (permite corregir errores).
     const colillaResult = await client.query(
@@ -153,7 +162,9 @@ router.post('/guardar', asyncHandler(async (req, res) => {
 
 // GET /api/colillas?periodoInicio=...&periodoFin=...
 router.get('/', asyncHandler(async (req, res) => {
-  const { periodoInicio, periodoFin, empleadoId } = req.query;
+  const f = validar(colillaFiltroSchema, req.query);
+  if (!f.ok) return res.status(400).json({ error: f.error });
+  const { periodoInicio, periodoFin, empleadoId } = f.datos;
   const condiciones = ['c.empresa_id = $1'];
   const valores = [req.empresaId];
 

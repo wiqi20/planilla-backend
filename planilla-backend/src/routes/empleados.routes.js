@@ -2,14 +2,22 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
+const { hoyCR } = require('../fechas');
+const { validar, idDeRuta, empleadoCrearSchema, empleadoEditarSchema } = require('../validacion');
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// La fecha puede llegar como texto AAAA-MM-DD o como Date (así devuelve pg las columnas DATE).
+function aFechaISO(fecha) {
+  if (fecha instanceof Date) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${fecha.getFullYear()}-${p(fecha.getMonth() + 1)}-${p(fecha.getDate())}`;
+  }
+  return String(fecha).slice(0, 10);
+}
 
 function tieneAntiguedadMinima(fechaIngreso) {
-  const inicio = new Date(fechaIngreso);
-  const hoy = new Date();
-  const meses = (hoy.getFullYear() - inicio.getFullYear()) * 12 + (hoy.getMonth() - inicio.getMonth());
-  return meses >= 12;
+  const [ai, mi] = aFechaISO(fechaIngreso).split('-').map(Number);
+  const [ah, mh] = hoyCR().split('-').map(Number); // "hoy" según Costa Rica, no según el servidor
+  return (ah - ai) * 12 + (mh - mi) >= 12;
 }
 
 // GET /api/empleados
@@ -24,18 +32,17 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // POST /api/empleados
 router.post('/', asyncHandler(async (req, res) => {
-  const { nombre, correo, salario, fechaIngreso, vacacionesDisponibles } = req.body || {};
-
-  if (!nombre || !correo || !salario || !fechaIngreso) {
+  const crudo = req.body || {};
+  if (!crudo.nombre || !crudo.correo || !crudo.salario || !crudo.fechaIngreso) {
     return res.status(400).json({ error: 'Faltan campos requeridos' });
   }
-  if (!EMAIL_REGEX.test(correo)) {
-    return res.status(400).json({ error: 'El correo no tiene un formato válido' });
-  }
+  const v = validar(empleadoCrearSchema, crudo);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const { nombre, correo, salario, fechaIngreso, vacacionesDisponibles } = v.datos;
 
   // Misma regla de negocio que en el cliente: sin 1 año de antigüedad no se
   // pueden asignar vacaciones base, sin importar lo que mande el request.
-  const vacacionesFinal = tieneAntiguedadMinima(fechaIngreso) ? (Number(vacacionesDisponibles) || 0) : 0;
+  const vacacionesFinal = tieneAntiguedadMinima(fechaIngreso) ? (vacacionesDisponibles || 0) : 0;
 
   try {
     const result = await db.query(
@@ -56,12 +63,11 @@ router.post('/', asyncHandler(async (req, res) => {
 
 // PUT /api/empleados/:id
 router.put('/:id', asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { nombre, correo, salario, fechaIngreso, vacacionesDisponibles, activo } = req.body || {};
-
-  if (correo && !EMAIL_REGEX.test(correo)) {
-    return res.status(400).json({ error: 'El correo no tiene un formato válido' });
-  }
+  const id = idDeRuta(req.params.id);
+  if (id === null) return res.status(404).json({ error: 'Colaborador no encontrado' });
+  const v = validar(empleadoEditarSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const { nombre, correo, salario, fechaIngreso, vacacionesDisponibles, activo } = v.datos;
 
   const existente = await db.query(
     'SELECT * FROM empleados WHERE id = $1 AND empresa_id = $2',
@@ -74,7 +80,7 @@ router.put('/:id', asyncHandler(async (req, res) => {
   const actual = existente.rows[0];
   const nuevaFecha = fechaIngreso || actual.fecha_ingreso;
   const vacacionesFinal = tieneAntiguedadMinima(nuevaFecha)
-    ? (vacacionesDisponibles !== undefined ? Number(vacacionesDisponibles) : actual.vacaciones_disponibles)
+    ? (vacacionesDisponibles !== undefined ? vacacionesDisponibles : actual.vacaciones_disponibles)
     : 0;
 
   try {
@@ -103,7 +109,8 @@ router.put('/:id', asyncHandler(async (req, res) => {
 
 // DELETE /api/empleados/:id
 router.delete('/:id', asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const id = idDeRuta(req.params.id);
+  if (id === null) return res.status(404).json({ error: 'Colaborador no encontrado' });
   const result = await db.query(
     'DELETE FROM empleados WHERE id = $1 AND empresa_id = $2 RETURNING id',
     [id, req.empresaId]
