@@ -1,9 +1,10 @@
 // Crea (o resetea) la empresa y el usuario administrador por defecto.
-// Por defecto: subdominio "admin", usuario "Admin", contraseña "IexxI"
-// (coincide con el subdominio fijo que usa el login del frontend).
+// Por defecto: subdominio "admin" y usuario "Admin". La contraseña NO tiene valor por defecto:
+// hay que darla en la variable de entorno ADMIN_PASSWORD (mínimo 8 caracteres). No se acepta por
+// la línea de comandos para que no quede en el historial del terminal.
 // Uso:
-//   node db/seed-admin.js
-//   node db/seed-admin.js --subdominio=admin --usuario=Admin --password=OtraClave --nombre="Mi Empresa"
+//   ADMIN_PASSWORD='una-clave-larga' node db/seed-admin.js
+//   ADMIN_PASSWORD='una-clave-larga' node db/seed-admin.js --subdominio=admin --usuario=Admin --nombre="Mi Empresa"
 //   node db/seed-admin.js --database-url=postgresql://user:pass@host:puerto/db  (si no tienes DATABASE_URL en el entorno)
 //
 // Es seguro correrlo varias veces: si la empresa/usuario ya existen, solo
@@ -28,7 +29,11 @@ async function main() {
 
   const subdominio = String(arg('subdominio', 'admin')).trim().toLowerCase();
   const usuario = arg('usuario', 'Admin');
-  const password = arg('password', 'IexxI');
+  const password = process.env.ADMIN_PASSWORD;
+  if (!password || password.length < 8) {
+    console.error('Falta la variable de entorno ADMIN_PASSWORD (mínimo 8 caracteres). Ejemplo:\n  ADMIN_PASSWORD=\'una-clave-larga\' node db/seed-admin.js');
+    process.exit(1);
+  }
   const nombreEmpresa = arg('nombre', 'Empresa Admin');
 
   const pool = new Pool({
@@ -83,7 +88,7 @@ async function main() {
     console.log('\nListo. Puedes iniciar sesión con:');
     console.log(`  Subdominio: ${empresa.subdominio}`);
     console.log(`  Usuario:    ${usuario}`);
-    console.log(`  Contraseña: ${password}`);
+    console.log('  Contraseña: la que diste en ADMIN_PASSWORD');
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error creando el administrador por defecto:', err.message);
