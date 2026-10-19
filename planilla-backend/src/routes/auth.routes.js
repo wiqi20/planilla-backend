@@ -5,6 +5,14 @@ const { hashPassword, verificarPassword, firmarToken } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
 
 const { validarSubdominio } = require('../subdominios');
+const { crearLimitador } = require('../limiteIntentos');
+
+// Límite de intentos FALLIDOS de login, por IP y por empresa+usuario. Un login correcto no cuenta
+// (así la demo pública, con clave conocida, no se bloquea sola). Configurable por entorno.
+const MAX_INTENTOS = Number(process.env.LOGIN_MAX_INTENTOS) || 10;
+const VENTANA_MIN = Number(process.env.LOGIN_VENTANA_MINUTOS) || 15;
+const limitePorIp = crearLimitador({ max: MAX_INTENTOS, ventanaMs: VENTANA_MIN * 60 * 1000 });
+const limitePorUsuario = crearLimitador({ max: MAX_INTENTOS, ventanaMs: VENTANA_MIN * 60 * 1000 });
 
 // POST /api/auth/registrar-empresa
 // Alta de un nuevo cliente de sticr.com: crea la empresa + su primer usuario administrador.
@@ -23,8 +31,8 @@ router.post('/registrar-empresa', asyncHandler(async (req, res) => {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdominioNormalizado)) {
     return res.status(400).json({ error: 'El subdominio solo puede tener letras minúsculas, números y guiones' });
   }
-  if (String(password).length < 4) {
-    return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
   }
 
   const client = await db.pool.connect();
@@ -67,6 +75,20 @@ router.post('/login', asyncHandler(async (req, res) => {
   if (!subdominio || !usuario || !password) {
     return res.status(400).json({ error: 'Faltan campos requeridos' });
   }
+  if ([subdominio, usuario, password].some((v) => typeof v !== 'string')) {
+    return res.status(400).json({ error: 'Empresa, usuario y contraseña deben ser texto' });
+  }
+
+  const claveIp = String(req.ip);
+  const claveUsuario = `${String(subdominio).trim().toLowerCase()}|${String(usuario).trim().toLowerCase()}`.slice(0, 200);
+  const espera = Math.max(limitePorIp.bloqueadoPor(claveIp), limitePorUsuario.bloqueadoPor(claveUsuario));
+  if (espera > 0) {
+    res.set('Retry-After', String(espera));
+    return res.status(429).json({
+      error: `Demasiados intentos fallidos. Espera ${Math.ceil(espera / 60)} minuto(s) e inténtalo de nuevo.`
+    });
+  }
+  const fallo = () => { limitePorIp.registrarFallo(claveIp); limitePorUsuario.registrarFallo(claveUsuario); };
 
   try {
     const empresaResult = await db.query(
@@ -75,6 +97,7 @@ router.post('/login', asyncHandler(async (req, res) => {
     );
     const empresa = empresaResult.rows[0];
     if (!empresa) {
+      fallo();
       return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
     }
     if (!empresa.activa) {
@@ -87,14 +110,17 @@ router.post('/login', asyncHandler(async (req, res) => {
     );
     const usuarioFila = usuarioResult.rows[0];
     if (!usuarioFila) {
+      fallo();
       return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
     }
 
     const passwordOk = await verificarPassword(password, usuarioFila.password_hash);
     if (!passwordOk) {
+      fallo();
       return res.status(401).json({ error: 'Empresa, usuario o contraseña incorrectos' });
     }
 
+    limitePorUsuario.olvidar(claveUsuario);
     const token = firmarToken({ empresaId: empresa.id, usuarioId: usuarioFila.id, usuario: usuarioFila.usuario });
     delete empresa.activa;
     res.json({ token, empresa, usuario: { id: usuarioFila.id, usuario: usuarioFila.usuario } });
@@ -114,3 +140,5 @@ router.get('/subdominio-disponible', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+// Solo para las pruebas: vacía los contadores de intentos.
+module.exports.reiniciarLimites = () => { limitePorIp.reiniciar(); limitePorUsuario.reiniciar(); };

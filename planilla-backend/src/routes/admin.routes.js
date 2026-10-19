@@ -3,6 +3,10 @@ const router = express.Router();
 const db = require('../db');
 const { hashPassword } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
+const { idDeRuta } = require('../validacion');
+
+// Contraseña mínima al CREAR o CAMBIAR. Quien ya tiene una más corta puede seguir entrando (el login no la revisa).
+const PASSWORD_MIN = 8;
 
 // En la empresa demo (pública) nadie puede cambiar usuarios ni datos de la empresa:
 // así un visitante no puede dejar a los demás fuera. Todo se restablece solo cada cierto tiempo.
@@ -57,7 +61,12 @@ router.get('/usuarios', asyncHandler(async (req, res) => {
 router.post('/usuarios', asyncHandler(async (req, res) => {
   const { usuario, password } = req.body || {};
   if (!usuario || !password) return res.status(400).json({ error: 'Faltan usuario o password' });
-  if (String(password).length < 4) return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
+  if (typeof password !== 'string' || password.length < PASSWORD_MIN) {
+    return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN} caracteres` });
+  }
+  if (typeof usuario !== 'string' || usuario.length > 40) {
+    return res.status(400).json({ error: 'El usuario debe ser un texto de hasta 40 caracteres' });
+  }
 
   try {
     const passwordHash = await hashPassword(password);
@@ -76,10 +85,11 @@ router.post('/usuarios', asyncHandler(async (req, res) => {
 
 // PUT /api/admin/usuarios/:id { usuario, password? }
 router.put('/usuarios/:id', asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const id = idDeRuta(req.params.id);
+  if (id === null) return res.status(404).json({ error: 'Usuario no encontrado' });
   const { usuario, password } = req.body || {};
-  if (password && String(password).length < 4) {
-    return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
+  if (password !== undefined && password !== null && password !== '' && (typeof password !== 'string' || password.length < PASSWORD_MIN)) {
+    return res.status(400).json({ error: `La contraseña debe tener al menos ${PASSWORD_MIN} caracteres` });
   }
 
   try {
@@ -105,7 +115,8 @@ router.put('/usuarios/:id', asyncHandler(async (req, res) => {
 
 // DELETE /api/admin/usuarios/:id
 router.delete('/usuarios/:id', asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const id = idDeRuta(req.params.id);
+  if (id === null) return res.status(404).json({ error: 'Usuario no encontrado' });
 
   const countResult = await db.query('SELECT COUNT(*)::int AS total FROM usuarios WHERE empresa_id = $1', [req.empresaId]);
   if (countResult.rows[0].total <= 1) {
