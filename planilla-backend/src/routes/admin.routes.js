@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const { hashPassword } = require('../auth');
+const { hashPassword, firmarToken } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
 const { idDeRuta } = require('../validacion');
 
@@ -106,13 +106,22 @@ router.put('/usuarios/:id', asyncHandler(async (req, res) => {
     const result = await db.query(
       `UPDATE usuarios SET
          usuario = COALESCE($1, usuario),
-         password_hash = COALESCE($2, password_hash)
+         password_hash = COALESCE($2, password_hash),
+         token_version = token_version + CASE WHEN $2::text IS NULL THEN 0 ELSE 1 END
        WHERE id = $3 AND empresa_id = $4
-       RETURNING id, usuario, creado_en`,
+       RETURNING id, usuario, creado_en, token_version`,
       [usuario || null, passwordHash, id, req.empresaId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
-    res.json(result.rows[0]);
+    const { token_version: tokenVersion, ...usuarioActualizado } = result.rows[0];
+    // S-05: cambiar la contraseña cierra todas las sesiones de ese usuario. Si quien la cambia es la propia
+    // persona, se le entrega un token nuevo (campo extra `token`) para que su sesión actual no se corte.
+    if (passwordHash && id === req.usuarioId) {
+      usuarioActualizado.token = firmarToken({
+        empresaId: req.empresaId, usuarioId: id, usuario: usuarioActualizado.usuario, tokenVersion
+      });
+    }
+    res.json(usuarioActualizado);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Ya existe un usuario con ese nombre' });
     console.error(err);

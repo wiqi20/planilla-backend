@@ -19,12 +19,14 @@ async function verificarPassword(password, hash) {
   return bcrypt.compare(password, hash);
 }
 
-function firmarToken({ empresaId, usuarioId, usuario }) {
-  return jwt.sign({ empresaId, usuarioId, usuario }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+// `tv` = versión de sesión del usuario (usuarios.token_version). Al cambiar su contraseña sube, y los
+// tokens con una versión menor dejan de servir (requireAuth la compara). Un token viejo sin `tv` cuenta como 0.
+function firmarToken({ empresaId, usuarioId, usuario, tokenVersion = 0 }) {
+  return jwt.sign({ empresaId, usuarioId, usuario, tv: tokenVersion }, JWT_SECRET, { algorithm: 'HS256', expiresIn: JWT_EXPIRES_IN });
 }
 
 function verificarToken(token) {
-  return jwt.verify(token, JWT_SECRET); // lanza si es inválido/expiró
+  return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }); // lanza si es inválido/expiró
 }
 
 module.exports = { hashPassword, verificarPassword, firmarToken, verificarToken };

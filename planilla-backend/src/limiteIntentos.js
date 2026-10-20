@@ -32,20 +32,24 @@ function crearLimitador({ max, ventanaMs, ahora = () => Date.now() }) {
     },
     // RESERVA un intento al entrar (antes de consultar la base y de bcrypt). Es síncrono y Node corre
     // un solo hilo, así que 1000 peticiones simultáneas no pueden colarse: la 11.ª ya ve el contador lleno.
-    // Devuelve un recibo para `devolver`.
+    // Devuelve un recibo PROPIO de esa reserva y de un solo uso, para `devolver` (N-12).
     reservar(clave) {
-      const r = vigente(clave);
-      if (r) { r.cuenta += 1; return r; }
+      let r = vigente(clave);
+      if (r) { r.cuenta += 1; return { registro: r, devuelto: false }; }
       if (registros.size >= MAX_CLAVES) limpiar();
-      const nuevo = { cuenta: 1, vence: ahora() + ventanaMs };
-      registros.set(clave, nuevo);
-      return nuevo;
+      r = { cuenta: 1, vence: ahora() + ventanaMs };
+      registros.set(clave, r);
+      return { registro: r, devuelto: false };
     },
-    // Devuelve la reserva (login correcto). Si la ventana ya venció y se creó otra, no toca la nueva.
+    // Devuelve la reserva (login correcto). Es idempotente: el recibo vale una sola vez, así que repetir
+    // la llamada no descuenta la reserva de otro intento. Si la ventana ya venció y se creó otra, no toca la nueva.
     devolver(clave, recibo) {
-      if (recibo && registros.get(clave) === recibo && recibo.cuenta > 0) {
-        recibo.cuenta -= 1;
-        if (recibo.cuenta === 0) registros.delete(clave);
+      if (!recibo || recibo.devuelto) return;
+      recibo.devuelto = true;
+      const r = recibo.registro;
+      if (registros.get(clave) === r && r.cuenta > 0) {
+        r.cuenta -= 1;
+        if (r.cuenta === 0) registros.delete(clave);
       }
     },
     olvidar(clave) { registros.delete(clave); },

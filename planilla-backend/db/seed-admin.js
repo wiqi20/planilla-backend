@@ -13,6 +13,7 @@
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const { Pool } = require('pg');
+const { migrar } = require('../src/migraciones');
 
 function arg(nombre, porDefecto) {
   const prefijo = `--${nombre}=`;
@@ -40,6 +41,9 @@ async function main() {
     connectionString: databaseUrl,
     ssl: databaseUrl.includes('localhost') ? false : { rejectUnauthorized: false }
   });
+
+  // Asegura que el esquema esté al día (idempotente) antes de escribir.
+  await migrar(pool);
 
   const client = await pool.connect();
   try {
@@ -71,7 +75,7 @@ async function main() {
     );
 
     if (usuarioExistente.rows[0]) {
-      await client.query('UPDATE usuarios SET password_hash = $1 WHERE id = $2', [
+      await client.query('UPDATE usuarios SET password_hash = $1, token_version = token_version + 1 WHERE id = $2', [
         passwordHash,
         usuarioExistente.rows[0].id
       ]);

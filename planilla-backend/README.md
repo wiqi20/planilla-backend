@@ -44,10 +44,15 @@ subdominio (`minegocio.sticr.app`) y sus datos separados.
 ```
 planilla-backend/
 ├── db/
-│   ├── schema.sql       # Tablas (empresas, usuarios, empleados, colillas, reportes)
-│   └── migrate.js       # Aplica schema.sql contra DATABASE_URL
+│   ├── migrations/      # 001_linea_base.sql (tablas), 002_token_version.sql, ... (NNN_nombre.sql, en orden)
+│   └── migrate.js       # `npm run migrate`: aplica las migraciones pendientes
+├── docs/api.md          # Documentación de cada ruta
 ├── src/
-│   ├── server.js        # Punto de entrada
+│   ├── server.js        # Punto de entrada (migra al arrancar y se apaga en orden)
+│   ├── migraciones.js   # Ejecutor de migraciones (tabla schema_migrations, checksum, transacción)
+│   ├── errores.js       # Formato único de error { error, mensaje } y rechazo del byte NUL
+│   ├── salud.js         # GET /health con consulta real a la base
+│   ├── cierre.js        # Apagado ordenado (SIGTERM/SIGINT)
 │   ├── db.js            # Conexión a PostgreSQL
 │   ├── auth.js          # bcrypt + JWT
 │   ├── calculo.js        # Misma lógica de cálculo que el frontend
@@ -87,17 +92,17 @@ configuración, y soporta dominios personalizados (lo que necesitas para que
 6. Pestaña **Settings** de tu servicio → **Deploy** → confirma que el
    *Start Command* sea `npm start` y que corra `npm install` antes (Railway
    lo detecta solo por el `package.json`).
-7. **Ejecutar la migración una vez** (crea las tablas): en Railway puedes
-   abrir una terminal del servicio (**Settings → Deploy → View Logs** tiene
-   un botón de terminal, o usa el CLI de Railway) y corre:
-   ```
-   npm run migrate
-   ```
+7. **Migraciones:** el servicio aplica solo las migraciones pendientes
+   (`db/migrations`) cada vez que arranca; si una falla, no inicia. También
+   puedes correrlas a mano con `npm run migrate`. Sobre una base que ya tenía
+   el esquema anterior no cambia ni borra nada: la migración 001 es idempotente.
+   Para cambiar el esquema se agrega un archivo nuevo (`003_...sql`); una
+   migración ya aplicada nunca se edita (el checksum lo detecta).
 8. Railway te da una URL pública (`algo.up.railway.app`). Pruébala:
    ```
    curl https://algo.up.railway.app/health
    ```
-   Debe responder `{"ok":true}`.
+   Debe responder `{"estado":"ok"}` (consulta la base; si no contesta, responde 503). **Ya no devuelve `{"ok":true}`:** configura el healthcheck de Railway para mirar solo el código HTTP.
 9. **Dominio propio**: en **Settings → Networking → Custom Domain**, agrega
    por ejemplo `api.sticr.com` y sigue las instrucciones para el registro
    CNAME en tu proveedor de DNS. Ahí es donde tu frontend (en cada subdominio
@@ -116,6 +121,13 @@ npm run dev                # servidor con recarga automática
 ADMIN_PASSWORD='una-clave-larga' npm run seed-admin   # opcional: crea el administrador inicial (mínimo 8 caracteres, sin valor por defecto)
 ```
 
+## Orden de despliegue (importante)
+
+El frontend que guarda el campo `token` de `PUT /api/admin/usuarios/:id` (cuando alguien cambia su PROPIA clave)
+debe desplegarse **antes o junto con** este backend. Si el backend sale primero, quien cambie su propia clave
+queda con un token anulado y es expulsado de su sesión. Las migraciones son aditivas, así que la versión anterior
+del código sigue funcionando sobre la base ya migrada.
+
 ## Pruebas
 
 ```bash
@@ -123,6 +135,7 @@ ADMIN_PASSWORD='una-clave-larga' npm run seed-admin   # opcional: crea el admini
 TEST_DATABASE_URL=postgresql://postgres@localhost:5432/planilla_test npm test
 ```
 
+El servidor de pruebas usa un puerto derivado del proceso (o `TEST_PORT` si lo defines), así que dos corridas simultáneas no chocan.
 Sin `TEST_DATABASE_URL` corren solo las pruebas que no necesitan base de datos.
 
 ## Seguridad — qué SÍ y qué NO resuelve esto
@@ -138,7 +151,8 @@ Sin `TEST_DATABASE_URL` corren solo las pruebas que no necesitan base de datos.
 - Límite de intentos de login reservado de forma atómica (10 por IP+usuario, 40 por IP, 100 por usuario cada 15 minutos; en memoria, una sola instancia), contraseñas
   nuevas de mínimo 8 caracteres, cabeceras de seguridad (`helmet`) y CORS con lista de orígenes
   (`CORS_ORIGINS`, ver `.env.example`).
-- Un token deja de servir si su usuario fue borrado o su empresa suspendida.
+- Un token deja de servir si su usuario fue borrado, su empresa suspendida o su contraseña cambió
+  (cada usuario tiene una `token_version`; ver `docs/api.md`).
 
 Lo que esto todavía NO incluye (para cuando quieras seguir creciendo):
 recuperación de contraseña por correo, roles distintos dentro de una empresa

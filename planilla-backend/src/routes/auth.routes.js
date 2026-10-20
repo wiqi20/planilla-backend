@@ -71,7 +71,7 @@ router.post('/registrar-empresa', asyncHandler(async (req, res) => {
     const token = firmarToken({ empresaId: empresa.id, usuarioId: usuarioCreado.id, usuario: usuarioCreado.usuario });
     res.status(201).json({ token, empresa, usuario: usuarioCreado });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') { // unique_violation
       return res.status(409).json({ error: 'Ese subdominio ya está en uso' });
     }
@@ -126,7 +126,7 @@ router.post('/login', asyncHandler(async (req, res) => {
     }
 
     const usuarioResult = await db.query(
-      'SELECT id, usuario, password_hash FROM usuarios WHERE empresa_id = $1 AND lower(usuario) = lower($2)',
+      'SELECT id, usuario, password_hash, token_version FROM usuarios WHERE empresa_id = $1 AND lower(usuario) = lower($2)',
       [empresa.id, usuario]
     );
     const usuarioFila = usuarioResult.rows[0];
@@ -137,7 +137,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 
     devolverReserva(); // acierto: no cuenta
     if (!esDemo) limitePar.olvidar(`${claveIp}|${claveUsuario}`); // quien acierta desde su IP empieza de cero
-    const token = firmarToken({ empresaId: empresa.id, usuarioId: usuarioFila.id, usuario: usuarioFila.usuario });
+    const token = firmarToken({ empresaId: empresa.id, usuarioId: usuarioFila.id, usuario: usuarioFila.usuario, tokenVersion: usuarioFila.token_version });
     delete empresa.activa;
     res.json({ token, empresa, usuario: { id: usuarioFila.id, usuario: usuarioFila.usuario } });
   } catch (err) {
