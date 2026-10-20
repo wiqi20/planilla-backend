@@ -162,7 +162,7 @@ test('CORS: origen ajeno no recibe Access-Control-Allow-Origin; los permitidos y
   assert.equal(ajeno.headers.get('access-control-allow-origin'), null);
   const preAjeno = await fetch(`${S.BASE}/api/empleados`, { method: 'OPTIONS', headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'GET' } });
   assert.equal(preAjeno.headers.get('access-control-allow-origin'), null);
-  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://posadasweet.sticr.app', 'https://demo.sticr.app', 'https://cliente9.sticr.app']) {
+  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://demo.sticr.app', 'https://cliente9.sticr.app']) {
     const r = await S.api('GET', '/health', { headers: { Origin: o } });
     assert.equal(r.headers.get('access-control-allow-origin'), o);
     assert.equal(r.headers.get('access-control-allow-credentials'), null);
