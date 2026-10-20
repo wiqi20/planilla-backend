@@ -3,7 +3,7 @@ const SLUG_REGEX = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/; // 3 a 30 caracteres
 
 // Nombres que no se pueden vender: los usa STI, el correo o el sistema.
 const RESERVADOS = new Set([
-  'www', 'api', 'app', 'admin', 'demo', 'planilla', 'planilla-api', 'posadasweet', 'sticr',
+  'www', 'api', 'app', 'admin', 'demo', 'planilla', 'planilla-api', 'sticr',
   'mail', 'correo', 'smtp', 'ftp', 'ns1', 'ns2', 'cdn', 'static', 'assets',
   'dev', 'test', 'staging', 'status', 'soporte', 'ayuda', 'docs', 'blog',
   'login', 'cuenta', 'panel', 'dashboard', 'billing', 'pagos', 'stripe', 'sistema', 'sistemas',

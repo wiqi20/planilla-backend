@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 
 const { hoyCR, esFechaISOValida } = require('../src/fechas');
 const { origenPermitido } = require('../src/cors');
+const { validarSubdominio } = require('../src/subdominios');
 const { crearLimitador } = require('../src/limiteIntentos');
 const { decidirProxy } = require('../src/proxy');
 const { validar, colillaSchema, empleadoCrearSchema, FERIADO_REGEX } = require('../src/validacion');
@@ -26,9 +27,23 @@ test('esFechaISOValida rechaza fechas que no existen', () => {
   assert.equal(esFechaISOValida(20260101), false);
 });
 
+test('CORS: el comodín de un nivel no cambia (cualquier subdominio válido sí, dos niveles no)', () => {
+  const env = { NODE_ENV: 'production' };
+  assert.equal(origenPermitido('https://posadasweet.sticr.app', env), true);
+  assert.equal(origenPermitido('https://otro-nombre.sticr.app', env), true);
+  assert.equal(origenPermitido('https://x.posadasweet.sticr.app', env), false);
+});
+
+test('Subdominios: posadasweet ya no está reservado; los reservados siguen rechazados', () => {
+  assert.deepEqual(validarSubdominio('posadasweet'), { ok: true, valor: 'posadasweet' });
+  for (const n of ['www', 'api', 'app', 'admin', 'demo', 'planilla', 'planilla-api', 'sticr']) {
+    assert.equal(validarSubdominio(n).ok, false, n);
+  }
+});
+
 test('CORS: orígenes por defecto en producción', () => {
   const env = { NODE_ENV: 'production' };
-  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://posadasweet.sticr.app', 'https://demo.sticr.app', 'https://cliente-1.sticr.app']) {
+  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://demo.sticr.app', 'https://cliente-1.sticr.app']) {
     assert.equal(origenPermitido(o, env), true, o);
   }
   for (const o of ['https://evil.com', 'https://sticr.app.evil.com', 'http://planilla.sticr.app', 'https://a.b.sticr.app',
