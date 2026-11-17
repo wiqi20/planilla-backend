@@ -36,7 +36,8 @@ subdominio (`minegocio.sticr.app`) y sus datos separados.
   suspendida no puede iniciar sesión ni usar un token que ya tenía; sus datos no se borran.
 - **Demo:** con `DEMO_ENABLED=true` se crea la empresa `demo` (usuario `demo`, contraseña `demo1234`) con
   datos de ejemplo. Se restablece cada `DEMO_RESET_HOURS` horas y no permite cambiar usuarios.
-- **Nombres reservados:** ver `src/subdominios.js`.
+- **Nombres reservados:** ver `src/subdominios.js`. Incluye los subdominios de otros sistemas de STI que comparten el comodín `*.sticr.app` (`crumble`, `crumble-admin`, `pasteleria-demo`, `pasteleria-demo-admin`): no se pueden vender y nunca cuentan como empresa.
+- **¿Existe esta dirección?:** `GET /api/auth/direccion?valor=nombre` responde solo `{ existe }`; el frontend la usa para mostrar «Esta dirección no existe» en subdominios sin empresa (ver `docs/api.md`).
 - **Base compartida con otro sistema:** `DB_SCHEMA=planilla` guarda las tablas en su propio esquema.
 
 ## Estructura

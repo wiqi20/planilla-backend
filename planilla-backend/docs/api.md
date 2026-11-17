@@ -80,8 +80,16 @@ Solo funciona con `ALLOW_PUBLIC_REGISTRATION=true` (instalaciones individuales a
 - `403` `El registro público está desactivado`
 - `409` `Ese subdominio ya está en uso`
 
-#### `GET /api/auth/subdominio-disponible?valor=<texto>` — Público
+#### `GET /api/auth/direccion?valor=<texto>` — Público (con límite de consultas)
+Dice si `valor.sticr.app` es una empresa de Planilla. El frontend la usa al cargar para mostrar «Esta dirección no existe» en vez del inicio de sesión.
+- `200` `{ "existe": boolean }` y nada más (ni nombre, ni estado, ni id). `Cache-Control: no-store`.
+- `existe: true` si hay una empresa con ese subdominio, **activa o suspendida** (la suspendida lo explica al iniciar sesión), o si es la demo y está creada.
+- `existe: false` en todos los demás casos, **con la misma respuesta byte a byte y la misma consulta a la base**: nombre libre, formato inválido, falta el parámetro, parámetro repetido, nombre reservado (`src/subdominios.js`) o subdominio de otro sistema de STI (`crumble`, `crumble-admin`, `pasteleria-demo`, `pasteleria-demo-admin`), aunque existiera una fila con ese nombre.
+- `429` `Demasiadas consultas. Espera N minuto(s) e inténtalo de nuevo.` con `Retry-After`. Cuenta **todas** las consultas (no solo las fallidas): `NOMBRES_MAX_POR_IP` (120 por defecto) por IP en la ventana del login (`LOGIN_VENTANA_MINUTOS`, 15 min). El contador es el mismo que el de `subdominio-disponible`.
+
+#### `GET /api/auth/subdominio-disponible?valor=<texto>` — Público (con límite de consultas)
 - `200` `{ "disponible": boolean, "motivo"?: string }` (`motivo` solo si no es válido o está reservado)
+- `429` igual que `GET /api/auth/direccion` (comparten el contador por IP). `Cache-Control: no-store`.
 
 ## Aprovisionamiento — `/api/provision` (Sitio)
 
