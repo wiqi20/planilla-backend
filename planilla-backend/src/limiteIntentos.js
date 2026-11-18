@@ -1,3 +1,4 @@
+const net = require('node:net');
 // Límite de intentos fallidos en memoria (ventana fija). Sirve para un solo servicio;
 // si algún día se corren varias copias, hay que moverlo a la base de datos o a Redis.
 const MAX_CLAVES = 20000; // tope de memoria: las claves vienen de lo que escribe el cliente
@@ -57,4 +58,31 @@ function crearLimitador({ max, ventanaMs, ahora = () => Date.now() }) {
   };
 }
 
-module.exports = { crearLimitador };
+// Clave de un límite por IP. IPv4 tal cual; IPv6 agrupada por su prefijo /64 (un solo cliente suele tener el /64 entero,
+// así que contar cada dirección por separado le daría 2^64 cupos). Las IPv4 escritas como IPv6 (::ffff:1.2.3.4) cuentan
+// como IPv4. Si no es una IP reconocible, se usa el texto tal cual.
+function claveDeIp(ip) {
+  let texto = String(ip || '').trim().toLowerCase();
+  const mapeada = texto.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (mapeada) return mapeada[1];
+  texto = texto.split('%')[0]; // sin identificador de zona (fe80::1%eth0)
+  if (net.isIPv6(texto)) return expandirIPv6(texto).slice(0, 4).join(':') + '::/64';
+  return texto;
+}
+
+// '2001:db8::1' -> ['2001','db8','0','0','0','0','0','1'] (8 grupos, sin ceros a la izquierda).
+function expandirIPv6(texto) {
+  let t = texto;
+  const v4 = t.match(/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/); // cola IPv4 (::1.2.3.4)
+  if (v4) {
+    const n = v4.slice(1).map(Number);
+    t = t.slice(0, v4.index) + ((n[0] << 8) | n[1]).toString(16) + ':' + ((n[2] << 8) | n[3]).toString(16);
+  }
+  const [izq, der] = t.includes('::') ? t.split('::') : [t, null];
+  const a = izq ? izq.split(':') : [];
+  const b = der ? der.split(':') : [];
+  const ceros = der === null ? [] : Array(8 - a.length - b.length).fill('0');
+  return [...a, ...ceros, ...b].map((g) => parseInt(g, 16).toString(16));
+}
+
+module.exports = { crearLimitador, claveDeIp };

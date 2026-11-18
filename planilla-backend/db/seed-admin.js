@@ -14,6 +14,7 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const { Pool } = require('pg');
 const { migrar } = require('../src/migraciones');
+const { esEtiquetaDns, validarSubdominio, NUNCA_CLIENTE } = require('../src/subdominios');
 
 function arg(nombre, porDefecto) {
   const prefijo = `--${nombre}=`;
@@ -29,6 +30,19 @@ async function main() {
   }
 
   const subdominio = String(arg('subdominio', 'admin')).trim().toLowerCase();
+  // El nombre tiene que poder ser una dirección (etiqueta DNS de 1 a 63 caracteres). Las reglas de VENTA (3–30, sin '--',
+  // sin reservados) no se exigen aquí, porque esta herramienta crea a propósito empresas especiales como 'admin'; solo se avisa.
+  if (!esEtiquetaDns(subdominio)) {
+    console.error(`El subdominio "${subdominio}" no es válido: usa de 1 a 63 letras minúsculas, números o guiones (no al inicio ni al final).`);
+    process.exit(1);
+  }
+  const reglasDeVenta = validarSubdominio(subdominio);
+  if (!reglasDeVenta.ok) {
+    console.warn(`Aviso: "${subdominio}" no cumple las reglas de venta (${reglasDeVenta.motivo}). Se crea igual.`);
+  }
+  if (NUNCA_CLIENTE.includes(subdominio)) {
+    console.warn(`Aviso: ${subdominio}.sticr.app muestra "Esta dirección no existe"; esta empresa solo se usa desde otra dirección (por ejemplo planilla.sticr.app con la empresa admin).`);
+  }
   const usuario = arg('usuario', 'Admin');
   const password = process.env.ADMIN_PASSWORD;
   if (!password || password.length < 8) {
