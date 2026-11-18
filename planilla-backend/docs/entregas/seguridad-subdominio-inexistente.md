@@ -2,7 +2,8 @@
 
 - **Fecha:** 17 nov 2026
 - **Rama / archivos revisados:** backend `fix/subdominio-inexistente` @ `3c93808` (`src/subdominios.js`, `src/routes/auth.routes.js`, `test/direccion.test.js`, `.env.example`); frontend `fix/subdominio-inexistente` @ `7db6590` (`planilla-frontend/index.html`). Este informe: rama `docs/seguridad-subdominio-inexistente`.
-- **Veredicto:** **RECHAZADO** (2 hallazgos altos: H-1 y H-2). El resto del cambio está bien hecho y lo que se probó pasa. Para aprobarlo hay que corregir H-1, o demostrar que no aplica, y H-2.
+- **Veredicto final (re-revisión del 18 nov 2026, backend `90f5b88` y frontend `287485d`):** **APROBADO**. Ver la sección «Re-revisión» al final.
+- **Veredicto de la primera revisión:** **RECHAZADO** (2 hallazgos altos: H-1 y H-2). El resto del cambio está bien hecho y lo que se probó pasa. Para aprobarlo hay que corregir H-1, o demostrar que no aplica, y H-2.
 
 ## Resumen
 La ruta nueva `GET /api/auth/direccion` da la misma respuesta a todos los casos negativos, tarda lo mismo, valida la entrada, no se guarda en caché, no da permisos de más por CORS y su límite de consultas resiste ráfagas. Ponerle el mismo límite a `/api/auth/subdominio-disponible` mejora lo que había. El script del frontend no tiene XSS y, si la comprobación falla, deja entrar al cliente como antes.
@@ -114,3 +115,35 @@ Todo se probó en local, con Postgres 16 desechable en `localhost:55471`, un dir
 
 ## Dependencias nuevas
 - Ninguna en el cambio revisado.
+
+## Re-revisión (18 nov 2026)
+
+- **Qué se revisó:** solo lo corregido. En el backend, el commit `90f5b88` sobre `3c93808`, con `src/subdominios.js`, `src/routes/auth.routes.js`, `src/limiteIntentos.js`, `db/seed-admin.js` y `package-lock.json`, más las pruebas nuevas. En el frontend, el commit `287485d` sobre `7db6590`.
+- **Entorno:** worktrees propios. Postgres 16 desechable en `/var/lib/postgresql/seg-rr2-subdom-7c41`, puerto 55491, y el servidor local en el 55492. Todo fue en local, sin Railway ni datos reales.
+- **Veredicto:** **APROBADO**. Ya no quedan hallazgos críticos ni altos.
+
+### Estado de cada hallazgo
+| Hallazgo | Estado | Evidencia |
+|---|---|---|
+| H-1 (alto) — clientes con nombre heredado sin ingreso | **Corregido** | `nombreParaConsultar` acepta cualquier etiqueta DNS de 1 a 63 caracteres y solo excluye los 8 de `NUNCA_CLIENTE`, sin reglas de venta. Sembré empresas `ab`, `a`, `x`×40, `y`×63 y `a--b`: todas dan `{"existe":true}`, y `" AB "` también. `crumble` y `www`, aunque tengan fila, dan `false`. También dan `false`: `admin`, `api`, `app`, `pasteleria-demo`, un nombre libre, `z`×64, `-ab`, `ab-`, `a.b`, `''`, `%00`, punycode inexistente, el parámetro sin valor, repetido, `valor[]` y `valor[x]`. Todos los `false` son idénticos byte a byte y llevan `Cache-Control: no-store`. |
+| H-1 — tiempo uniforme | **Se mantiene** | Mediana de 300 peticiones: existe 1,49 ms, libre 1,46 ms, `crumble` con fila 1,36 ms, inválido 1,29 ms. Todos los casos hacen la misma consulta parametrizada. La diferencia de ~0,2 ms queda dentro del ruido de red y no permite distinguir los casos de forma útil. |
+| H-2 (alto) — `npm audit` | **Corregido** | `npm ci` con el lock nuevo da body-parser 1.20.9 y qs 6.16.2. `npm audit --omit=dev` → **found 0 vulnerabilities**. |
+| M-1 (medio) — enumeración, IPv6 | **Mitigado** | `claveDeIp` agrupa IPv6 por /64 y normaliza `::ffff:a.b.c.d` a IPv4. Con 200 direcciones distintas del mismo /64: 120 respuestas 200 y 80 respuestas 429. La forma larga del mismo /64 recibe 429 (comparte la clave). Otro /64 da 200. `::ffff:198.51.100.5` y `198.51.100.5` comparten cupo (120 y luego 429), y la IP vecina no se ve afectada. Queda como **recomendación**: si hay varias réplicas, el límite tiene que ir a un almacén compartido. |
+| `seed-admin` | **Correcto** | Rechaza con código de salida 1 los nombres que no son etiqueta DNS (`a.b`, `-ab`, 64 caracteres, con espacio). Con un nombre que no cumple las reglas de venta o que está en `NUNCA_CLIENTE` solo avisa y lo crea, lo cual tiene sentido para `admin`. |
+| B-1 (bajo) — lista repetida | **Abierto (bajo)** | Hoy las tres copias coinciden: los 8 nombres en el `<head>`, en `NUNCA_CLIENTE` de `index.html` y en `src/subdominios.js`. La prueba del backend compara contra una copia fija, no contra el HTML del frontend, así que un cambio en un solo repositorio no lo detecta. |
+| B-2 (bajo) — `admin.sticr.app` | **Abierto (decisión del PM)** | Sin cambios. |
+| Frontend `287485d` | **Sin impacto en seguridad** | Solo agrega 4 líneas de CSS de contraste en el ingreso con tema claro. No cambia el script. |
+
+### Pruebas
+- **Suite completa del backend:** `TEST_DATABASE_URL=… npm test` → 113 pruebas, 112 pasan y 1 falla: «las peticiones en vuelo durante SIGTERM se completan antes de salir».
+  - Esa prueba depende del tiempo y está en `test/cierre-arranque.test.js`, que el commit no toca.
+  - Al correr ese archivo solo 3 veces, pasó 6 de 6 en cada corrida.
+  - La tomo como intermitente y ajena a este cambio. Se lo anoto a QA.
+
+### Observación (no bloquea)
+- El límite del **login** sigue contando por `String(req.ip)`, sin agrupar IPv6 por /64. No era parte de este cambio. Recomiendo usar también ahí `claveDeIp` en una próxima ola.
+
+### Qué sigue sin revisarse
+- **Producción:** con H-1 corregido, la consulta de solo lectura ya no hace falta.
+- **Railway:** no verifiqué cómo arma `X-Forwarded-For` ni si llega tráfico IPv6.
+- **Frontend en navegador:** no lo ejecuté yo.
