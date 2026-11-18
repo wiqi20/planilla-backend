@@ -40,3 +40,32 @@ Nueva ruta pública `GET /api/auth/direccion?valor=<nombre>` que responde solo `
 
 ## Dependencias nuevas
 - Ninguna.
+
+---
+
+## Correcciones tras la revisión (Seguridad: RECHAZADO por H-1 y H-2; QA: RECHAZADO por QA-01)
+
+Informes: `docs/entregas/seguridad-subdominio-inexistente.md` (rama `docs/seguridad-subdominio-inexistente`) y `docs/subdominio-inexistente/qa.md` (frontend, rama `docs/qa-subdominio-inexistente`).
+
+1. **H-1 / QA-01 (alto): una empresa existente ya no puede recibir `existe:false`.** `/direccion` dejó de usar las reglas de venta. Ahora consulta cualquier texto con formato de etiqueta DNS (1 a 63 caracteres, `nombreParaConsultar` en `src/subdominios.js`) y descarta solo los 8 de `NUNCA_CLIENTE` (`crumble`, `crumble-admin`, `pasteleria-demo`, `pasteleria-demo-admin`, `www`, `admin`, `api`, `app`). `existe` = hay fila. Los casos negativos siguen haciendo la misma consulta y dando la misma respuesta. `nombreDeEmpresaPosible` se reemplazó por `nombreParaConsultar`. `planilla` y `planilla-api` ya no están excluidos: si hubiera una fila con ese nombre, existe (el frontend igual no consulta para esas direcciones).
+2. **H-2 (alto): `npm audit fix`** dentro del rango semver: `body-parser` 1.20.8 → 1.20.9 y `qs` 6.16.0 → 6.16.2. `package.json` no cambia; el `package-lock.json` queda versionado. `npm audit --omit=dev` y `npm audit` → 0 vulnerabilidades.
+3. **M-1 (medio): IPv6 por /64** en el límite de `/direccion` y `/subdominio-disponible` (`claveDeIp` en `src/limiteIntentos.js`). Las IPv4 escritas como IPv6 (`::ffff:a.b.c.d`) cuentan como IPv4 y se ignora el identificador de zona. El límite del login no cambia: sigue con la IP exacta. Sigue en memoria, en una sola instancia.
+4. **seed-admin:** exige que `--subdominio` sea una etiqueta DNS de 1 a 63 caracteres (si no, sale con 1 sin tocar la base). Si el nombre no cumple las reglas de venta, avisa y lo crea igual. Si está en `NUNCA_CLIENTE` (por ejemplo `admin`), avisa que esa dirección muestra «no existe».
+5. **Pruebas de QA traídas a la rama:** `test/direccion-qa.test.js` (copia de `qa-subdominio-inexistente/direccion-qa.test.js`, solo cambia la ruta del `require`). Corre con `npm test`.
+
+### Cómo se comprobó (correcciones)
+- `TEST_DATABASE_URL=postgresql://postgres@localhost:56717/subdomc7_test TEST_PORT=56718 npm test` (Postgres 16 desechable) → **113 de 113**: las 91 de antes, 14 en `test/direccion.test.js` y las 8 de QA.
+- Las pruebas nuevas cubren:
+  - Empresas heredadas `ab`, `q8`, una de 40 y otra de 63 caracteres, `ayuda` y una con `--` → `existe:true`, también en mayúsculas.
+  - QA-B4 (antes fallaba) y QA-B3 → ok.
+  - Filas sembradas con `crumble`, `pasteleria-demo`, `www` y `app` → misma respuesta que un nombre libre.
+  - Tiempo: libre 1,61 ms y reservado 1,54 ms de mediana.
+  - IPv6: 3 direcciones del mismo /64 agotan un límite de 3, una cuarta del mismo /64 da 429 y otro /64 da 200.
+  - `claveDeIp` como prueba unitaria.
+  - seed-admin: 64 caracteres, `-abc`, `a.b` y un nombre con espacio salen con 1; `o1` se crea con el aviso «no cumple las reglas de venta» y `/direccion` lo ve.
+- `npm test` sin base → 32 pasan, 81 se saltan, 0 fallan.
+- `npm audit --omit=dev` → `found 0 vulnerabilities`.
+
+### Riesgos que siguen
+- La lista `NUNCA_CLIENTE` está repetida en el frontend (`index.html`, dos lugares). Ninguna prueba automática compara los dos repositorios; la prueba del backend fija la lista exacta y el frontend la repite igual.
+- El límite sigue en memoria. Con varias réplicas, cada una cuenta por separado (M-1, parte no corregida).

@@ -4,10 +4,9 @@ const db = require('../db');
 const { hashPassword, verificarPassword, firmarToken } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
 
-const { validarSubdominio, nombreDeEmpresaPosible } = require('../subdominios');
-const { DEMO_SUBDOMINIO } = require('../demo');
+const { validarSubdominio, nombreParaConsultar } = require('../subdominios');
 const bcrypt = require('bcryptjs');
-const { crearLimitador } = require('../limiteIntentos');
+const { crearLimitador, claveDeIp } = require('../limiteIntentos');
 
 // Límite de intentos de login. El intento se RESERVA al entrar (antes de la base y de bcrypt) y solo se
 // devuelve si el login acierta; así una ráfaga simultánea no pasa de `max` verificaciones por clave.
@@ -32,7 +31,7 @@ const limiteNombresPorIp = crearLimitador({ max: Number(process.env.NOMBRES_MAX_
 
 function limitarConsultaDeNombres(req, res, next) {
   res.set('Cache-Control', 'no-store');
-  const clave = String(req.ip);
+  const clave = claveDeIp(req.ip); // IPv6 agrupada por /64: un solo cliente controla todo su bloque
   const espera = limiteNombresPorIp.bloqueadoPor(clave);
   if (espera > 0) {
     res.set('Retry-After', String(espera));
@@ -168,12 +167,13 @@ router.post('/login', asyncHandler(async (req, res) => {
 // GET /api/auth/direccion?valor=minegocio
 // Dice si minegocio.sticr.app es una empresa de Planilla (para que el frontend muestre "Esta dirección no existe"
 // en vez del inicio de sesión). Responde SOLO { existe: boolean }: ni nombre, ni estado, ni id.
-// Formato inválido, nombre reservado, otro sistema de STI (crumble, ...) o nombre libre dan exactamente la misma
-// respuesta, y en todos los casos se hace la misma consulta a la base, para que el tiempo tampoco los distinga.
-// Una empresa suspendida existe (su inicio de sesión ya explica que está suspendida).
+// existe = hay una fila en empresas (activa o suspendida, incluida la demo) con ese subdominio. NO se aplican las reglas
+// de venta: una empresa heredada con nombre de 2 o de 40 caracteres, o con un nombre hoy reservado, sigue existiendo.
+// Solo se descartan los que no son etiqueta DNS y los de NUNCA_CLIENTE (otros sistemas de STI, www, admin, api, app).
+// Todos los casos negativos dan exactamente la misma respuesta y hacen la misma consulta, para que el tiempo no los distinga.
 router.get('/direccion', limitarConsultaDeNombres, asyncHandler(async (req, res) => {
-  const nombre = nombreDeEmpresaPosible(req.query.valor, { demo: DEMO_SUBDOMINIO });
-  // '' nunca coincide con una empresa (el subdominio tiene al menos 3 caracteres).
+  const nombre = nombreParaConsultar(req.query.valor);
+  // '' nunca coincide con una empresa (la columna no admite un subdominio vacío por la regla de DNS de arriba).
   const result = await db.query('SELECT 1 FROM empresas WHERE subdominio = $1', [nombre || '']);
   res.json({ existe: nombre !== null && result.rows.length > 0 });
 }));
