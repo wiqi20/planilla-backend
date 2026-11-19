@@ -4,9 +4,9 @@ const db = require('../db');
 const { hashPassword, verificarPassword, firmarToken } = require('../auth');
 const asyncHandler = require('../utils/asyncHandler');
 
-const { validarSubdominio } = require('../subdominios');
+const { validarSubdominio, nombreParaConsultar } = require('../subdominios');
 const bcrypt = require('bcryptjs');
-const { crearLimitador } = require('../limiteIntentos');
+const { crearLimitador, claveDeIp } = require('../limiteIntentos');
 
 // Límite de intentos de login. El intento se RESERVA al entrar (antes de la base y de bcrypt) y solo se
 // devuelve si el login acierta; así una ráfaga simultánea no pasa de `max` verificaciones por clave.
@@ -23,6 +23,23 @@ const MAX_PAR = Number(process.env.LOGIN_MAX_INTENTOS) || 10;
 const limitePar = crearLimitador({ max: MAX_PAR, ventanaMs: VENTANA_MS });
 const limitePorIp = crearLimitador({ max: Number(process.env.LOGIN_MAX_POR_IP) || 40, ventanaMs: VENTANA_MS });
 const limitePorUsuario = crearLimitador({ max: Number(process.env.LOGIN_MAX_POR_USUARIO) || 100, ventanaMs: VENTANA_MS });
+
+// Límite de las consultas públicas de nombres (GET /direccion y GET /subdominio-disponible): cuenta TODAS las
+// consultas por IP (no solo las fallidas), en la misma ventana que el login. Frena la enumeración de empresas;
+// el frontend hace una sola consulta por carga de página, así que el umbral deja holgura a una oficina tras una misma IP.
+const limiteNombresPorIp = crearLimitador({ max: Number(process.env.NOMBRES_MAX_POR_IP) || 120, ventanaMs: VENTANA_MS });
+
+function limitarConsultaDeNombres(req, res, next) {
+  res.set('Cache-Control', 'no-store');
+  const clave = claveDeIp(req.ip); // IPv6 agrupada por /64: un solo cliente controla todo su bloque
+  const espera = limiteNombresPorIp.bloqueadoPor(clave);
+  if (espera > 0) {
+    res.set('Retry-After', String(espera));
+    return res.status(429).json({ error: `Demasiadas consultas. Espera ${Math.ceil(espera / 60)} minuto(s) e inténtalo de nuevo.` });
+  }
+  limiteNombresPorIp.reservar(clave); // síncrono: una ráfaga simultánea no pasa del máximo
+  next();
+}
 
 // Hash falso para gastar el mismo tiempo de bcrypt cuando la empresa o el usuario no existen
 // (así la respuesta tarda parecido y no revela si existen).
@@ -41,10 +58,10 @@ router.post('/registrar-empresa', asyncHandler(async (req, res) => {
   if (!nombreEmpresa || !subdominio || !usuario || !password) {
     return res.status(400).json({ error: 'Faltan campos requeridos' });
   }
-  const subdominioNormalizado = String(subdominio).trim().toLowerCase();
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdominioNormalizado)) {
-    return res.status(400).json({ error: 'El subdominio solo puede tener letras minúsculas, números y guiones' });
-  }
+  // Mismas reglas que el aprovisionamiento (formato y nombres reservados, incluidos los de otros sistemas de STI).
+  const revision = validarSubdominio(subdominio);
+  if (!revision.ok) return res.status(400).json({ error: revision.motivo });
+  const subdominioNormalizado = revision.valor;
   if (String(password).length < 8) {
     return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
   }
@@ -147,8 +164,22 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 }));
 
+// GET /api/auth/direccion?valor=minegocio
+// Dice si minegocio.sticr.app es una empresa de Planilla (para que el frontend muestre "Esta dirección no existe"
+// en vez del inicio de sesión). Responde SOLO { existe: boolean }: ni nombre, ni estado, ni id.
+// existe = hay una fila en empresas (activa o suspendida, incluida la demo) con ese subdominio. NO se aplican las reglas
+// de venta: una empresa heredada con nombre de 2 o de 40 caracteres, o con un nombre hoy reservado, sigue existiendo.
+// Solo se descartan los que no son etiqueta DNS y los de NUNCA_CLIENTE (otros sistemas de STI, www, admin, api, app).
+// Todos los casos negativos dan exactamente la misma respuesta y hacen la misma consulta, para que el tiempo no los distinga.
+router.get('/direccion', limitarConsultaDeNombres, asyncHandler(async (req, res) => {
+  const nombre = nombreParaConsultar(req.query.valor);
+  // '' nunca coincide con una empresa (la columna no admite un subdominio vacío por la regla de DNS de arriba).
+  const result = await db.query('SELECT 1 FROM empresas WHERE subdominio = $1', [nombre || '']);
+  res.json({ existe: nombre !== null && result.rows.length > 0 });
+}));
+
 // GET /api/auth/subdominio-disponible?valor=cliente1
-router.get('/subdominio-disponible', asyncHandler(async (req, res) => {
+router.get('/subdominio-disponible', limitarConsultaDeNombres, asyncHandler(async (req, res) => {
   const revision = validarSubdominio(req.query.valor);
   if (!revision.ok) return res.json({ disponible: false, motivo: revision.motivo });
   const valor = revision.valor;
@@ -158,4 +189,6 @@ router.get('/subdominio-disponible', asyncHandler(async (req, res) => {
 
 module.exports = router;
 // Solo para las pruebas: vacía los contadores de intentos.
-module.exports.reiniciarLimites = () => { limitePar.reiniciar(); limitePorIp.reiniciar(); limitePorUsuario.reiniciar(); };
+module.exports.reiniciarLimites = () => {
+  limitePar.reiniciar(); limitePorIp.reiniciar(); limitePorUsuario.reiniciar(); limiteNombresPorIp.reiniciar();
+};

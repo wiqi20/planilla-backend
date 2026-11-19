@@ -1,12 +1,18 @@
 // Reglas para los nombres de subdominio (cliente.sticr.app).
 const SLUG_REGEX = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/; // 3 a 30 caracteres
 
-// Nombres que no se pueden vender: los usa STI, el correo o el sistema.
+// Subdominios de otros sistemas de STI que comparten el comodín *.sticr.app. Nunca son clientes de Planilla:
+// no se pueden vender aquí y GET /api/auth/direccion responde que no existen (ver NUNCA_CLIENTE).
+const OTROS_SISTEMAS = ['crumble', 'crumble-admin', 'pasteleria-demo', 'pasteleria-demo-admin'];
+
+// Nombres que no se pueden vender: los usa STI, el correo, el sistema u otros sistemas de STI.
+// 'demo' está aquí porque no se vende, pero la empresa demo sí existe (la crea src/demo.js).
 const RESERVADOS = new Set([
   'www', 'api', 'app', 'admin', 'demo', 'planilla', 'planilla-api', 'sticr',
   'mail', 'correo', 'smtp', 'ftp', 'ns1', 'ns2', 'cdn', 'static', 'assets',
   'dev', 'test', 'staging', 'status', 'soporte', 'ayuda', 'docs', 'blog',
   'login', 'cuenta', 'panel', 'dashboard', 'billing', 'pagos', 'stripe', 'sistema', 'sistemas',
+  ...OTROS_SISTEMAS,
 ]);
 
 function validarSubdominio(valor) {
@@ -23,4 +29,27 @@ function validarSubdominio(valor) {
   return { ok: true, valor: limpio };
 }
 
-module.exports = { validarSubdominio, RESERVADOS };
+// Etiqueta DNS válida (1 a 63 caracteres). Es la regla para saber si un nombre PUEDE EXISTIR como empresa, distinta
+// de las reglas de VENTA (validarSubdominio): hay empresas heredadas con nombres de 1–2 o 31–63 caracteres, con '--'
+// o con nombres que después se reservaron (registro público anterior, seed-admin), y siguen siendo clientes.
+const ETIQUETA_DNS = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+// Subdominios que nunca son una empresa de Planilla aunque hubiera una fila con ese nombre: los otros sistemas de STI
+// y las direcciones generales. El frontend (index.html) tiene la misma lista; test/direccion.test.js las compara.
+// 'planilla' y 'planilla-api' NO están: planilla.sticr.app entra con la empresa 'admin' por el login normal.
+const NUNCA_CLIENTE = [...OTROS_SISTEMAS, 'www', 'admin', 'api', 'app'];
+
+function esEtiquetaDns(valor) {
+  return typeof valor === 'string' && ETIQUETA_DNS.test(valor);
+}
+
+// Nombre a consultar en GET /api/auth/direccion: normalizado si tiene formato de etiqueta DNS y no es de NUNCA_CLIENTE;
+// null en cualquier otro caso (no es texto, formato inválido, otro sistema). No aplica las reglas de venta.
+function nombreParaConsultar(valor) {
+  if (typeof valor !== 'string') return null;
+  const limpio = valor.trim().toLowerCase();
+  if (!esEtiquetaDns(limpio) || NUNCA_CLIENTE.includes(limpio)) return null;
+  return limpio;
+}
+
+module.exports = { validarSubdominio, nombreParaConsultar, esEtiquetaDns, RESERVADOS, OTROS_SISTEMAS, NUNCA_CLIENTE };

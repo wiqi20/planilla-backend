@@ -80,8 +80,16 @@ Solo funciona con `ALLOW_PUBLIC_REGISTRATION=true` (instalaciones individuales a
 - `403` `El registro público está desactivado`
 - `409` `Ese subdominio ya está en uso`
 
-#### `GET /api/auth/subdominio-disponible?valor=<texto>` — Público
+#### `GET /api/auth/direccion?valor=<texto>` — Público (con límite de consultas)
+Dice si `valor.sticr.app` es una empresa de Planilla. El frontend la usa al cargar para mostrar «Esta dirección no existe» en vez del inicio de sesión.
+- `200` `{ "existe": boolean }` y nada más (ni nombre, ni estado, ni id). `Cache-Control: no-store`.
+- `existe: true` si hay una empresa con ese subdominio, **activa o suspendida** (la suspendida lo explica al iniciar sesión), incluida la demo si está creada. **No se aplican las reglas de venta**: una empresa heredada con un nombre de 1–2 o 31–63 caracteres, con `--` o con un nombre hoy reservado (por ejemplo `ayuda`) existe.
+- `existe: false` en todos los demás casos, **con la misma respuesta byte a byte y la misma consulta a la base**: nombre libre, texto que no es etiqueta DNS (1 a 63 letras minúsculas, números o guiones, sin guion al inicio ni al final), falta el parámetro, parámetro repetido, o uno de los 8 nombres que nunca son de Planilla (`crumble`, `crumble-admin`, `pasteleria-demo`, `pasteleria-demo-admin`, `www`, `admin`, `api`, `app`; `NUNCA_CLIENTE` en `src/subdominios.js`), aunque existiera una fila con ese nombre.
+- `429` `Demasiadas consultas. Espera N minuto(s) e inténtalo de nuevo.` con `Retry-After`. Cuenta **todas** las consultas (no solo las fallidas): `NOMBRES_MAX_POR_IP` (120 por defecto) por IP en la ventana del login (`LOGIN_VENTANA_MINUTOS`, 15 min). Las IPv6 se cuentan por su prefijo /64. El contador es el mismo que el de `subdominio-disponible`.
+
+#### `GET /api/auth/subdominio-disponible?valor=<texto>` — Público (con límite de consultas)
 - `200` `{ "disponible": boolean, "motivo"?: string }` (`motivo` solo si no es válido o está reservado)
+- `429` igual que `GET /api/auth/direccion` (comparten el contador por IP). `Cache-Control: no-store`.
 
 ## Aprovisionamiento — `/api/provision` (Sitio)
 

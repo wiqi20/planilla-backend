@@ -36,7 +36,8 @@ subdominio (`minegocio.sticr.app`) y sus datos separados.
   suspendida no puede iniciar sesión ni usar un token que ya tenía; sus datos no se borran.
 - **Demo:** con `DEMO_ENABLED=true` se crea la empresa `demo` (usuario `demo`, contraseña `demo1234`) con
   datos de ejemplo. Se restablece cada `DEMO_RESET_HOURS` horas y no permite cambiar usuarios.
-- **Nombres reservados:** ver `src/subdominios.js`.
+- **Nombres reservados:** ver `src/subdominios.js`. Incluye los subdominios de otros sistemas de STI que comparten el comodín `*.sticr.app` (`crumble`, `crumble-admin`, `pasteleria-demo`, `pasteleria-demo-admin`): no se pueden vender y nunca cuentan como empresa.
+- **¿Existe esta dirección?:** `GET /api/auth/direccion?valor=nombre` responde solo `{ existe }` (cualquier empresa que exista, aunque su nombre no cumpla las reglas de venta); el frontend la usa para mostrar «Esta dirección no existe» en subdominios sin empresa (ver `docs/api.md`).
 - **Base compartida con otro sistema:** `DB_SCHEMA=planilla` guarda las tablas en su propio esquema.
 
 ## Estructura
@@ -119,6 +120,7 @@ cp .env.example .env      # y completa DATABASE_URL / JWT_SECRET
 npm run migrate           # crea las tablas
 npm run dev                # servidor con recarga automática
 ADMIN_PASSWORD='una-clave-larga' npm run seed-admin   # opcional: crea el administrador inicial (mínimo 8 caracteres, sin valor por defecto)
+# seed-admin exige que --subdominio sea una etiqueta DNS (1 a 63 caracteres) y avisa, sin impedirlo, si no cumple las reglas de venta.
 ```
 
 ## Orden de despliegue (importante)
