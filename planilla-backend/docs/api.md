@@ -16,6 +16,16 @@ Los montos están en colones, como números decimales (la conversión a centavos
 
 Lo que no está listado aquí no existe (`404`). Hoy todo usuario de una empresa es administrador y puede todo dentro de su empresa.
 
+### Desde qué páginas se puede llamar (CORS)
+
+La API vive en `planilla-api.sticr.app`. Un navegador solo recibe `Access-Control-Allow-Origin` si la página viene de:
+
+- `https://sticr.app`, `https://planilla.sticr.app` o `https://<nombre>.planilla.sticr.app` de un solo nivel (la demo `demo.planilla.sticr.app` y las empresas de clientes).
+- **Transición** (se quita en el paso 8 de `docs/proyectos/planilla/mover-comodin.md`, repositorio STICR_landingpage): `https://<nombre>.sticr.app` de un solo nivel, salvo `crumble`, `crumble-admin`, `pasteleria-demo` y `pasteleria-demo-admin`.
+- Fuera de producción, `http://localhost:<puerto>`.
+
+Si la variable `CORS_ORIGINS` está definida, manda sobre esta lista (orígenes exactos, sin comodines). Las llamadas sin cabecera `Origin` (servidor a servidor) no pasan por CORS.
+
 ### Formato de error (todas las rutas)
 
 ```json
@@ -81,7 +91,7 @@ Solo funciona con `ALLOW_PUBLIC_REGISTRATION=true` (instalaciones individuales a
 - `409` `Ese subdominio ya está en uso`
 
 #### `GET /api/auth/direccion?valor=<texto>` — Público (con límite de consultas)
-Dice si `valor.sticr.app` es una empresa de Planilla. El frontend la usa al cargar para mostrar «Esta dirección no existe» en vez del inicio de sesión.
+Dice si `valor.planilla.sticr.app` es una empresa de Planilla. El frontend la usa al cargar para mostrar «Esta dirección no existe» en vez del inicio de sesión.
 - `200` `{ "existe": boolean }` y nada más (ni nombre, ni estado, ni id). `Cache-Control: no-store`.
 - `existe: true` si hay una empresa con ese subdominio, **activa o suspendida** (la suspendida lo explica al iniciar sesión), incluida la demo si está creada. **No se aplican las reglas de venta**: una empresa heredada con un nombre de 1–2 o 31–63 caracteres, con `--` o con un nombre hoy reservado (por ejemplo `ayuda`) existe.
 - `existe: false` en todos los demás casos, **con la misma respuesta byte a byte y la misma consulta a la base**: nombre libre, texto que no es etiqueta DNS (1 a 63 letras minúsculas, números o guiones, sin guion al inicio ni al final), falta el parámetro, parámetro repetido, o uno de los 8 nombres que nunca son de Planilla (`crumble`, `crumble-admin`, `pasteleria-demo`, `pasteleria-demo-admin`, `www`, `admin`, `api`, `app`; `NUNCA_CLIENTE` en `src/subdominios.js`), aunque existiera una fila con ese nombre.

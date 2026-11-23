@@ -162,14 +162,20 @@ test('CORS: origen ajeno no recibe Access-Control-Allow-Origin; los permitidos y
   assert.equal(ajeno.headers.get('access-control-allow-origin'), null);
   const preAjeno = await fetch(`${S.BASE}/api/empleados`, { method: 'OPTIONS', headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'GET' } });
   assert.equal(preAjeno.headers.get('access-control-allow-origin'), null);
-  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://demo.sticr.app', 'https://cliente9.sticr.app']) {
+  // demo.sticr.app y cliente9.sticr.app: TRANSICIÓN, quitar en el paso 8 de mover-comodin.md (pasan a rechazarse).
+  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://demo.planilla.sticr.app', 'https://cliente9.planilla.sticr.app',
+    'https://demo.sticr.app', 'https://cliente9.sticr.app']) {
     const r = await S.api('GET', '/health', { headers: { Origin: o } });
     assert.equal(r.headers.get('access-control-allow-origin'), o);
     assert.equal(r.headers.get('access-control-allow-credentials'), null);
   }
-  const pre = await fetch(`${S.BASE}/api/empleados`, { method: 'OPTIONS', headers: { Origin: 'https://planilla.sticr.app', 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'authorization,content-type' } });
+  for (const o of ['https://crumble.sticr.app', 'https://a.b.planilla.sticr.app', 'https://planilla.sticr.app.ejemplo.com']) {
+    const r = await S.api('GET', '/health', { headers: { Origin: o } });
+    assert.equal(r.headers.get('access-control-allow-origin'), null, o);
+  }
+  const pre = await fetch(`${S.BASE}/api/empleados`, { method: 'OPTIONS', headers: { Origin: 'https://minegocio.planilla.sticr.app', 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'authorization,content-type' } });
   assert.equal(pre.status, 204);
-  assert.equal(pre.headers.get('access-control-allow-origin'), 'https://planilla.sticr.app');
+  assert.equal(pre.headers.get('access-control-allow-origin'), 'https://minegocio.planilla.sticr.app');
   // localhost no se permite en producción
   const local = await S.api('GET', '/health', { headers: { Origin: 'http://localhost:3000' } });
   assert.equal(local.headers.get('access-control-allow-origin'), null);

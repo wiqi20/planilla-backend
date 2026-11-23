@@ -165,7 +165,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/auth/direccion?valor=minegocio
-// Dice si minegocio.sticr.app es una empresa de Planilla (para que el frontend muestre "Esta dirección no existe"
+// Dice si minegocio.planilla.sticr.app es una empresa de Planilla (para que el frontend muestre "Esta dirección no existe"
 // en vez del inicio de sesión). Responde SOLO { existe: boolean }: ni nombre, ni estado, ni id.
 // existe = hay una fila en empresas (activa o suspendida, incluida la demo) con ese subdominio. NO se aplican las reglas
 // de venta: una empresa heredada con nombre de 2 o de 40 caracteres, o con un nombre hoy reservado, sigue existiendo.

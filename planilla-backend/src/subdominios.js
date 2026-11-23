@@ -1,8 +1,10 @@
-// Reglas para los nombres de subdominio (cliente.sticr.app).
+// Reglas para los nombres de subdominio (cliente.planilla.sticr.app).
 const SLUG_REGEX = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/; // 3 a 30 caracteres
 
-// Subdominios de otros sistemas de STI que comparten el comodín *.sticr.app. Nunca son clientes de Planilla:
-// no se pueden vender aquí y GET /api/auth/direccion responde que no existen (ver NUNCA_CLIENTE).
+// Nombres de otros sistemas de STI (tienen sus propios nombres fijos en sticr.app, como crumble.sticr.app). Ya no
+// comparten comodín con Planilla (cada sistema usa el suyo: *.planilla.sticr.app), pero siguen sin venderse para no
+// crear direcciones que confundan, como crumble.planilla.sticr.app. GET /api/auth/direccion responde que no existen
+// (ver NUNCA_CLIENTE) y el CORS de transición los rechaza (src/cors.js).
 const OTROS_SISTEMAS = ['crumble', 'crumble-admin', 'pasteleria-demo', 'pasteleria-demo-admin'];
 
 // Nombres que no se pueden vender: los usa STI, el correo, el sistema u otros sistemas de STI.
@@ -34,9 +36,11 @@ function validarSubdominio(valor) {
 // o con nombres que después se reservaron (registro público anterior, seed-admin), y siguen siendo clientes.
 const ETIQUETA_DNS = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
-// Subdominios que nunca son una empresa de Planilla aunque hubiera una fila con ese nombre: los otros sistemas de STI
-// y las direcciones generales. El frontend (index.html) tiene la misma lista; test/direccion.test.js las compara.
-// 'planilla' y 'planilla-api' NO están: planilla.sticr.app entra con la empresa 'admin' por el login normal.
+// Subdominios que nunca son una empresa de Planilla aunque hubiera una fila con ese nombre: los nombres de otros
+// sistemas de STI y las direcciones generales, para no vender nombres que confundan. El frontend (index.html) tiene
+// la misma lista; test/direccion.test.js las compara.
+// 'planilla' y 'planilla-api' NO están: planilla.sticr.app es la raíz de Planilla y el frontend la manda a la ficha
+// del sistema en sticr.app (no entra a ninguna empresa); planilla-api.sticr.app es la API.
 const NUNCA_CLIENTE = [...OTROS_SISTEMAS, 'www', 'admin', 'api', 'app'];
 
 function esEtiquetaDns(valor) {
