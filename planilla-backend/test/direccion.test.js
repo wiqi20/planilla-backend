@@ -1,4 +1,4 @@
-// GET /api/auth/direccion: ¿esta dirección (nombre.sticr.app) es una empresa de Planilla?
+// GET /api/auth/direccion: ¿esta dirección (nombre.planilla.sticr.app) es una empresa de Planilla?
 // Unidad (sin base) e integración (con TEST_DATABASE_URL).
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -177,12 +177,17 @@ test('direccion: el límite agrupa IPv6 por /64 (cambiar la parte baja de la dir
   assert.equal((await direccion('o1tlibre1', `${prefijo.replace(/:7$/, ':8')}::1`)).status, 200); // otro /64
 });
 
-test('direccion: CORS permite leerla desde un subdominio de sticr.app', opts, async (t) => {
+test('direccion: CORS permite leerla desde un subdominio de planilla.sticr.app y no desde otro sistema de STI', opts, async (t) => {
   const srv = await S.iniciarServidor({ NODE_ENV: 'production' });
   t.after(() => srv.detener());
-  const r = await S.api('GET', '/api/auth/direccion?valor=crumble', { headers: { Origin: 'https://crumble.sticr.app', 'X-Forwarded-For': S.ipFalsa() } });
+  const r = await S.api('GET', '/api/auth/direccion?valor=crumble', { headers: { Origin: 'https://crumble.planilla.sticr.app', 'X-Forwarded-For': S.ipFalsa() } });
   assert.equal(r.status, 200);
-  assert.equal(r.headers.get('access-control-allow-origin'), 'https://crumble.sticr.app');
+  assert.deepEqual(r.body, { existe: false });
+  assert.equal(r.headers.get('access-control-allow-origin'), 'https://crumble.planilla.sticr.app');
+  // crumble.sticr.app es de otro sistema: su navegador no puede leer la respuesta (la ruta responde igual).
+  const otro = await S.api('GET', '/api/auth/direccion?valor=crumble', { headers: { Origin: 'https://crumble.sticr.app', 'X-Forwarded-For': S.ipFalsa() } });
+  assert.equal(otro.status, 200);
+  assert.equal(otro.headers.get('access-control-allow-origin'), null);
 });
 
 test('registro público (si se activara) y aprovisionamiento rechazan los nombres reservados', opts, async (t) => {

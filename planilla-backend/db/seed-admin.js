@@ -41,7 +41,7 @@ async function main() {
     console.warn(`Aviso: "${subdominio}" no cumple las reglas de venta (${reglasDeVenta.motivo}). Se crea igual.`);
   }
   if (NUNCA_CLIENTE.includes(subdominio)) {
-    console.warn(`Aviso: ${subdominio}.sticr.app muestra "Esta dirección no existe"; esta empresa solo se usa desde otra dirección (por ejemplo planilla.sticr.app con la empresa admin).`);
+    console.warn(`Aviso: ${subdominio}.planilla.sticr.app muestra "Esta dirección no existe"; esta empresa no se puede usar desde su dirección (solo en desarrollo local).`);
   }
   const usuario = arg('usuario', 'Admin');
   const password = process.env.ADMIN_PASSWORD;

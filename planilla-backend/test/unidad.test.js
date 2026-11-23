@@ -27,11 +27,38 @@ test('esFechaISOValida rechaza fechas que no existen', () => {
   assert.equal(esFechaISOValida(20260101), false);
 });
 
-test('CORS: el comodín de un nivel no cambia (cualquier subdominio válido sí, dos niveles no)', () => {
+test('CORS: comodín de Planilla de un nivel (cualquier etiqueta válida sí, dos niveles no)', () => {
   const env = { NODE_ENV: 'production' };
-  assert.equal(origenPermitido('https://posadasweet.sticr.app', env), true);
-  assert.equal(origenPermitido('https://otro-nombre.sticr.app', env), true);
-  assert.equal(origenPermitido('https://x.posadasweet.sticr.app', env), false);
+  assert.equal(origenPermitido('https://posadasweet.planilla.sticr.app', env), true);
+  assert.equal(origenPermitido('https://otro-nombre.planilla.sticr.app', env), true);
+  assert.equal(origenPermitido('https://x.posadasweet.planilla.sticr.app', env), false);
+});
+
+test('CORS: casos del plan de mover el comodín (mover-comodin.md 3.2)', () => {
+  const env = { NODE_ENV: 'production' };
+  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://minegocio.planilla.sticr.app',
+    'https://demo.planilla.sticr.app', 'https://a.planilla.sticr.app', `https://${'a'.repeat(63)}.planilla.sticr.app`]) {
+    assert.equal(origenPermitido(o, env), true, o);
+  }
+  for (const o of ['http://minegocio.planilla.sticr.app', 'https://a.b.planilla.sticr.app', 'https://planilla.sticr.app.ejemplo.com',
+    'https://-x.planilla.sticr.app', 'https://x-.planilla.sticr.app',
+    `https://${'a'.repeat(64)}.planilla.sticr.app`, 'https://minegocio.planilla.sticr.app/', 'https://minegocio.planilla.sticr.app:8443',
+    'https://MINEGOCIO.planilla.sticr.app', 'https://minegocio.planilla.sticr.app.ejemplo.com']) {
+    assert.equal(origenPermitido(o, env), false, o);
+  }
+});
+
+// TRANSICIÓN: quitar en el paso 8 de mover-comodin.md. Desde ese PR, *.sticr.app de un nivel pasa a rechazarse
+// (incluido https://xplanilla.sticr.app, que el plan 3.2 pide rechazar y hoy entra por la forma vieja).
+test('CORS (transición): la forma vieja *.sticr.app de un nivel sigue aceptada, salvo los otros sistemas de STI', () => {
+  const env = { NODE_ENV: 'production' };
+  for (const o of ['https://demo.sticr.app', 'https://cliente-1.sticr.app', 'https://posadasweet.sticr.app', 'https://xplanilla.sticr.app']) {
+    assert.equal(origenPermitido(o, env), true, o);
+  }
+  for (const o of ['https://crumble.sticr.app', 'https://crumble-admin.sticr.app', 'https://pasteleria-demo.sticr.app',
+    'https://pasteleria-demo-admin.sticr.app', 'https://x.posadasweet.sticr.app', 'http://demo.sticr.app']) {
+    assert.equal(origenPermitido(o, env), false, o);
+  }
 });
 
 test('Subdominios: posadasweet ya no está reservado; los reservados siguen rechazados', () => {
@@ -43,11 +70,11 @@ test('Subdominios: posadasweet ya no está reservado; los reservados siguen rech
 
 test('CORS: orígenes por defecto en producción', () => {
   const env = { NODE_ENV: 'production' };
-  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://demo.sticr.app', 'https://cliente-1.sticr.app']) {
+  for (const o of ['https://sticr.app', 'https://planilla.sticr.app', 'https://demo.planilla.sticr.app', 'https://cliente-1.planilla.sticr.app']) {
     assert.equal(origenPermitido(o, env), true, o);
   }
   for (const o of ['https://evil.com', 'https://sticr.app.evil.com', 'http://planilla.sticr.app', 'https://a.b.sticr.app',
-    'https://evilsticr.app', 'http://localhost:3000', undefined, 'null']) {
+    'https://evilsticr.app', 'https://crumble.sticr.app', 'http://localhost:3000', undefined, 'null', '']) {
     assert.equal(origenPermitido(o, env), false, String(o));
   }
 });
@@ -64,7 +91,13 @@ test('CORS: CORS_ORIGINS manda sobre los valores por defecto', () => {
   assert.equal(origenPermitido('https://uno.com', env), true);
   assert.equal(origenPermitido('https://dos.com', env), true);
   assert.equal(origenPermitido('https://planilla.sticr.app', env), false);
+  assert.equal(origenPermitido('https://demo.planilla.sticr.app', env), false);
+  assert.equal(origenPermitido('https://demo.sticr.app', env), false); // tampoco la forma de transición
   assert.equal(origenPermitido('*', env), false);
+  const exacta = { NODE_ENV: 'production', CORS_ORIGINS: 'https://planilla.sticr.app,https://demo.planilla.sticr.app' };
+  assert.equal(origenPermitido('https://demo.planilla.sticr.app', exacta), true);
+  assert.equal(origenPermitido('https://otra.planilla.sticr.app', exacta), false); // sin comodines
+  assert.equal(origenPermitido('https://demo.planilla.sticr.app', { CORS_ORIGINS: 'https://*.planilla.sticr.app' }), false); // '*' no es comodín
 });
 
 test('limitador: la reserva es inmediata, bloquea al llegar al máximo y se libera al vencer la ventana', () => {

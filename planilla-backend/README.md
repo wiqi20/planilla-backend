@@ -27,7 +27,9 @@ a un proveedor real (Resend, SendGrid, etc.) en vez de `mailto:`.
 ## Servicio compartido (venta desde sticr.app)
 
 Una sola instalación atiende a todos los clientes nuevos. Cada cliente es una empresa con su
-subdominio (`minegocio.sticr.app`) y sus datos separados.
+subdominio (`minegocio.planilla.sticr.app`) y sus datos separados. La demo es `demo.planilla.sticr.app`,
+`planilla.sticr.app` es la raíz (el frontend la manda a la ficha del sistema en sticr.app) y la API vive en
+`planilla-api.sticr.app`.
 
 - **Crear una empresa:** ya no es público. El sitio sticr.app llama a `/api/provision/empresa` cuando
   el pago se confirma, y a `/api/provision/admin` cuando el cliente elige su usuario y contraseña.
@@ -36,7 +38,8 @@ subdominio (`minegocio.sticr.app`) y sus datos separados.
   suspendida no puede iniciar sesión ni usar un token que ya tenía; sus datos no se borran.
 - **Demo:** con `DEMO_ENABLED=true` se crea la empresa `demo` (usuario `demo`, contraseña `demo1234`) con
   datos de ejemplo. Se restablece cada `DEMO_RESET_HOURS` horas y no permite cambiar usuarios.
-- **Nombres reservados:** ver `src/subdominios.js`. Incluye los subdominios de otros sistemas de STI que comparten el comodín `*.sticr.app` (`crumble`, `crumble-admin`, `pasteleria-demo`, `pasteleria-demo-admin`): no se pueden vender y nunca cuentan como empresa.
+- **Nombres reservados:** ver `src/subdominios.js`. Incluye los nombres de otros sistemas de STI (`crumble`, `crumble-admin`, `pasteleria-demo`, `pasteleria-demo-admin`): ya no comparten comodín con Planilla (cada sistema usa el suyo, `*.planilla.sticr.app`), pero no se pueden vender para no crear direcciones que confundan y nunca cuentan como empresa.
+- **CORS:** por defecto acepta `https://sticr.app`, `https://planilla.sticr.app` y `https://<nombre>.planilla.sticr.app` de un solo nivel (ver `src/cors.js`). Durante la transición del comodín también acepta `https://<nombre>.sticr.app`, salvo los nombres de otros sistemas; se quita en el paso 8 de `docs/proyectos/planilla/mover-comodin.md` (repositorio STICR_landingpage).
 - **¿Existe esta dirección?:** `GET /api/auth/direccion?valor=nombre` responde solo `{ existe }` (cualquier empresa que exista, aunque su nombre no cumpla las reglas de venta); el frontend la usa para mostrar «Esta dirección no existe» en subdominios sin empresa (ver `docs/api.md`).
 - **Base compartida con otro sistema:** `DB_SCHEMA=planilla` guarda las tablas en su propio esquema.
 
